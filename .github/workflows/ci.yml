@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  harn:
+    name: Harn
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Read Harn version
+        id: harn-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < .harn-version)"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Cache harn-cli
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo-harn/${{ steps.harn-version.outputs.version }}
+          key: harn-cli-${{ runner.os }}-${{ steps.harn-version.outputs.version }}-${{ hashFiles('.harn-version') }}
+          restore-keys: |
+            harn-cli-${{ runner.os }}-${{ steps.harn-version.outputs.version }}-
+
+      - name: Install harn-cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          harn_root="${HOME}/.cargo-harn/${{ steps.harn-version.outputs.version }}"
+          if [[ ! -x "${harn_root}/bin/harn" ]]; then
+            cargo install harn-cli --version "${{ steps.harn-version.outputs.version }}" --locked --root "${harn_root}"
+          fi
+          echo "${harn_root}/bin" >> "${GITHUB_PATH}"
+
+      - name: Show Harn version
+        run: harn --version
+
+      - name: Check
+        run: harn check src/lib.harn
+
+      - name: Lint
+        run: harn lint src/lib.harn
+
+      - name: Format
+        run: harn fmt --check src/lib.harn
+
+      - name: Run smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for test in tests/*.harn; do
+            harn run "${test}"
+          done
