@@ -62,6 +62,24 @@ trigger respond on slack {
 This repo is being built out by Claude Code sessions following a structured
 prompt. **Read [SESSION_PROMPT.md](./SESSION_PROMPT.md) before making changes.**
 
+Install the pinned Harn CLI from crates.io:
+
+```sh
+cargo install harn-cli --version "$(cat .harn-version)" --locked
+harn --version
+```
+
+Run the local CI equivalent from this repo:
+
+```sh
+harn check src/lib.harn
+harn lint src/lib.harn
+harn fmt --check src/lib.harn
+for test in tests/*.harn; do
+  harn run "$test" || exit 1
+done
+```
+
 ## License
 
 Dual-licensed under MIT and Apache-2.0.

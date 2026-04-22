@@ -218,8 +218,8 @@ fn __signing_secret(raw) {
 }
 
 fn __include_bot_messages(raw) {
-  let configured = raw?.include_bot_messages ?? raw?.config?.include_bot_messages \
-    ?? __state()?.ctx?.include_bot_messages \
+  let configured = raw?.include_bot_messages ?? raw?.config?.include_bot_messages
+    ?? __state()?.ctx?.include_bot_messages
     ?? false
   return configured
 }
