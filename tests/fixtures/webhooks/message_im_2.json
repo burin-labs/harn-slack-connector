@@ -1,0 +1,1 @@
+{"token":"legacy-token","team_id":"T123","api_app_id":"A123","event":{"client_msg_id":"m-2","type":"message","text":"hello dm","user":"U222","ts":"1713650001.000200","team":"T123","channel":"D222","event_ts":"1713650001.000200","channel_type":"im"},"type":"event_callback","event_id":"Ev-message-2","event_time":1713650001}

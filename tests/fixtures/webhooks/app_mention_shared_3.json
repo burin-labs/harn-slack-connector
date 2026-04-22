@@ -1,0 +1,1 @@
+{"token":"legacy-token","team_id":"T123","api_app_id":"A123","event":{"type":"app_mention","user":"U666","text":"<@B123> from shared channel","ts":"1713650102.000300","team":"T123","channel":"C333","event_ts":"1713650102.000300"},"type":"event_callback","event_id":"Ev-mention-3","event_time":1713650102}

@@ -1,0 +1,1 @@
+{"token":"legacy-token","team_id":"T123","api_app_id":"A123","event":{"client_msg_id":"m-3","type":"message","text":"thread reply","user":"U333","ts":"1713650002.000300","thread_ts":"1713650000.000100","team":"T123","channel":"C111","event_ts":"1713650002.000300","channel_type":"channel"},"type":"event_callback","event_id":"Ev-message-3","event_time":1713650002}

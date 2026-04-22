@@ -1,0 +1,326 @@
+let SLACK_PROVIDER_ID = "slack"
+
+let SLACK_STATE_KEY = "harn-slack-connector.state"
+
+let SLACK_API_BASE_URL = "https://slack.com/api"
+
+let SLACK_SIGNATURE_WINDOW_SECONDS = 300
+
+let SLACK_OUTBOUND_METHODS = [
+  "chat.postMessage",
+  "chat.update",
+  "chat.delete",
+  "conversations.history",
+  "conversations.replies",
+  "users.info",
+]
+
+/** Return this connector's Harn provider id. */
+pub fn provider_id() {
+  return SLACK_PROVIDER_ID
+}
+
+/** Return the trigger kinds supported by this connector. */
+pub fn kinds() {
+  return ["webhook"]
+}
+
+/** Return the canonical normalized Slack event payload schema. */
+pub fn payload_schema() {
+  return {
+    name: "SlackEventPayload",
+    type: "object",
+    required: ["event_type", "resource_id", "channel", "user", "occurred_at", "raw"],
+    properties: {
+    event_type: {type: "string", enum: ["message", "app_mention", "reaction_added"]},
+    resource_id: {type: "string"},
+    channel: {type: "string"},
+    thread_ts: {type: ["string", "null"]},
+    user: {
+    type: "object",
+    required: ["id"],
+    properties: {id: {type: "string"}, name: {type: ["string", "null"]}},
+  },
+    text: {type: ["string", "null"]},
+    reaction: {type: ["string", "null"]},
+    occurred_at: {type: ["string", "int", "float", "null"]},
+    raw: {type: "object"},
+  },
+  }
+}
+
+/** Initialize connector state with orchestrator context. */
+pub fn init(ctx = nil) {
+  let current = __state()
+  let next = current + {initialized: true, ctx: ctx ?? {}}
+  __set_state(next)
+  return next
+}
+
+/** Activate webhook bindings and reject duplicate configured paths. */
+pub fn activate(bindings = []) {
+  var by_id = {}
+  var seen_paths = {}
+  for binding in bindings ?? [] {
+    let binding_id = binding?.binding_id ?? binding?.id ?? "binding-" + to_string(len(by_id.keys()))
+    let path = binding?.path ?? binding?.match?.path
+    if path != nil && path != "" {
+      if seen_paths.get(path) {
+        return __err("activation", "slack connector path `" + path + "` is configured by multiple bindings")
+      }
+      seen_paths[path] = true
+    }
+    by_id[binding_id] = binding + {binding_id: binding_id}
+  }
+  let next = __state() + {bindings: by_id, active: true}
+  __set_state(next)
+  return {provider: SLACK_PROVIDER_ID, kind: "webhook", bindings: len(by_id.keys())}
+}
+
+/** Clear connector lifecycle state. */
+pub fn shutdown() {
+  store_delete(SLACK_STATE_KEY)
+  return {provider: SLACK_PROVIDER_ID, active: false}
+}
+
+@complexity(allow)
+/**
+ * Verify and normalize a raw Slack Events API request.
+ *
+ * Slack requires a 200 response within 3 seconds. Keep this function CPU-only:
+ * verify HMAC, parse JSON, return immediate_response, and never perform HTTP.
+ */
+pub fn normalize_inbound(raw) {
+  let body_text = raw?.body_text ?? raw?.body ?? ""
+  let headers = raw?.headers ?? {}
+  let verified = __verify_slack_signature(raw, headers, body_text)
+  if is_err(verified) {
+    return verified
+  }
+  let parsed = try {
+    json_parse(body_text)
+  }
+  if is_err(parsed) {
+    return __err("invalid_json", "slack payload body is not valid JSON")
+  }
+  let payload = unwrap(parsed)
+  if payload?.type == "url_verification" {
+    return {
+      immediate_response: {status: 200, body: payload?.challenge ?? "", content_type: "text/plain"},
+      event: nil,
+    }
+  }
+  let normalized = __normalize_event_callback(payload, raw)
+  if is_err(normalized) {
+    return normalized
+  }
+  return {immediate_response: {status: 200, body: "", content_type: "text/plain"}, event: normalized}
+}
+
+@complexity(allow)
+/** Dispatch a supported Slack Web API method with JSON body semantics. */
+pub fn call(method, args = {}) {
+  if !contains(SLACK_OUTBOUND_METHODS, method) {
+    return __err("method_not_found", "slack connector does not implement outbound method `" + method + "`")
+  }
+  let config = __outbound_config(args ?? {})
+  if is_err(config) {
+    return config
+  }
+  let cfg = unwrap(config)
+  var body = args ?? {}
+  body.remove("api_base_url")
+  body.remove("bot_token")
+  body.remove("token")
+  body.remove("bot_token_secret")
+  body.remove("secrets")
+  if method == "users.info" && body?.user == nil && body?.user_id != nil {
+    body["user"] = body.user_id
+    body.remove("user_id")
+  }
+  let response = try {
+    http_post(
+    __slack_api_url(cfg.api_base_url, method),
+    json_stringify(body),
+    {
+    headers: {Authorization: "Bearer " + cfg.bot_token, ["Content-Type"]: "application/json; charset=utf-8"},
+  },
+  )
+  }
+  if is_err(response) {
+    return __err("transport", to_string(unwrap_err(response)))
+  }
+  let http_response = unwrap(response)
+  let decoded = try {
+    json_parse(http_response.body)
+  }
+  if is_err(decoded) {
+    return __err("invalid_response", "Slack API method `" + method + "` returned invalid JSON")
+  }
+  let payload = unwrap(decoded)
+  if http_response.status < 200 || http_response.status >= 300 {
+    return __err(
+      "transport",
+      payload?.error ?? ("Slack API request failed with status " + to_string(http_response.status)),
+    )
+  }
+  if !(payload?.ok ?? false) {
+    return __err("slack_error", payload?.error ?? ("Slack API method `" + method + "` failed"))
+  }
+  return payload
+}
+
+fn __state() {
+  return store_get(SLACK_STATE_KEY) ?? {initialized: false, active: false, bindings: {}, ctx: {}}
+}
+
+fn __set_state(state) {
+  store_set(SLACK_STATE_KEY, state)
+  return state
+}
+
+fn __err(code, message) {
+  return Err({code: code, message: message})
+}
+
+fn __header(headers, name) {
+  let wanted = lowercase(name)
+  for entry in (headers ?? {}).entries() {
+    if lowercase(trim(to_string(entry.key))) == wanted {
+      return trim(to_string(entry.value))
+    }
+  }
+  return nil
+}
+
+fn __signing_secret(raw) {
+  let direct = raw?.signing_secret ?? raw?.secret ?? raw?.config?.signing_secret ?? raw?.secrets?.signing_secret
+  if direct != nil && trim(to_string(direct)) != "" {
+    return to_string(direct)
+  }
+  let state = __state()
+  let ctx_secret = state?.ctx?.signing_secret ?? state?.ctx?.secrets?.signing_secret
+  if ctx_secret != nil && trim(to_string(ctx_secret)) != "" {
+    return to_string(ctx_secret)
+  }
+  let bindings = state?.bindings ?? {}
+  let binding_id = raw?.metadata?.binding_id ?? raw?.binding_id
+  if binding_id != nil {
+    let binding = bindings.get(binding_id)
+    return binding?.signing_secret ?? binding?.secrets?.signing_secret ?? binding?.config?.signing_secret
+  }
+  let values = bindings.values()
+  if len(values) == 1 {
+    let binding = values[0]
+    return binding?.signing_secret ?? binding?.secrets?.signing_secret ?? binding?.config?.signing_secret
+  }
+  return nil
+}
+
+fn __include_bot_messages(raw) {
+  let configured = raw?.include_bot_messages ?? raw?.config?.include_bot_messages \
+    ?? __state()?.ctx?.include_bot_messages \
+    ?? false
+  return configured
+}
+
+fn __verify_slack_signature(raw, headers, body_text) {
+  let signature = __header(headers, "x-slack-signature")
+  if signature == nil || signature == "" {
+    return __err("missing_signature", "missing x-slack-signature header")
+  }
+  let request_ts = __header(headers, "x-slack-request-timestamp")
+  if request_ts == nil || request_ts == "" {
+    return __err("missing_timestamp", "missing x-slack-request-timestamp header")
+  }
+  let parsed_ts = try {
+    to_int(trim(request_ts))
+  }
+  if is_err(parsed_ts) {
+    return __err("invalid_timestamp", "x-slack-request-timestamp is not an integer")
+  }
+  let ts = unwrap(parsed_ts)
+  let now = raw?.now ?? timestamp()
+  if abs(now - ts) > SLACK_SIGNATURE_WINDOW_SECONDS {
+    return __err(
+      "expired_timestamp",
+      "x-slack-request-timestamp is outside the allowed 5 minute verification window",
+    )
+  }
+  let secret = __signing_secret(raw)
+  if secret == nil || trim(to_string(secret)) == "" {
+    return __err("missing_secret", "slack signing_secret is required")
+  }
+  let basestring = "v0:" + to_string(ts) + ":" + body_text
+  let expected = "v0=" + hmac_sha256(to_string(secret), basestring)
+  if !constant_time_eq(expected, signature) {
+    return __err("invalid_signature", "x-slack-signature did not match the request body")
+  }
+  return Ok(true)
+}
+
+@complexity(allow)
+fn __normalize_event_callback(payload, raw) {
+  if payload?.type != "event_callback" {
+    return __err("unsupported_payload", "unsupported Slack payload type `" + to_string(payload?.type) + "`")
+  }
+  let event = payload?.event
+  if event == nil {
+    return __err("missing_event", "slack event_callback missing event")
+  }
+  let event_type = event?.type
+  if event_type == nil || event_type == "" {
+    return __err("missing_event_type", "slack event missing type")
+  }
+  if event_type == "message" && event?.bot_id != nil && !__include_bot_messages(raw) {
+    return nil
+  }
+  if event_type == "message" || event_type == "app_mention" {
+    let channel = event?.channel ?? ""
+    let ts = event?.ts ?? event?.event_ts ?? ""
+    return {
+      event_type: event_type,
+      resource_id: channel + "/" + ts,
+      channel: channel,
+      thread_ts: event?.thread_ts ?? ts,
+      user: {id: event?.user ?? "", name: event?.user_name ?? event?.username},
+      text: event?.text ?? "",
+      occurred_at: event?.event_ts ?? event?.ts ?? payload?.event_time,
+      raw: event,
+    }
+  }
+  if event_type == "reaction_added" {
+    let item = event?.item ?? {}
+    let channel = item?.channel ?? event?.channel ?? ""
+    let ts = item?.ts ?? event?.event_ts ?? ""
+    return {
+      event_type: "reaction_added",
+      resource_id: channel + "/" + ts,
+      channel: channel,
+      thread_ts: item?.ts,
+      user: {id: event?.user ?? "", name: event?.user_name ?? event?.username},
+      text: event?.reaction ?? "",
+      reaction: event?.reaction ?? "",
+      occurred_at: event?.event_ts ?? payload?.event_time,
+      raw: event,
+    }
+  }
+  return __err("unsupported_event", "unsupported Slack event type `" + to_string(event_type) + "`")
+}
+
+fn __outbound_config(args) {
+  let api_base_url = args?.api_base_url ?? env_or("SLACK_API_BASE_URL", SLACK_API_BASE_URL)
+  let bot_token = args?.bot_token ?? args?.token ?? args?.secrets?.bot_token ?? env("SLACK_BOT_TOKEN")
+  if bot_token == nil || trim(to_string(bot_token)) == "" {
+    return __err("missing_bot_token", "slack connector requires bot_token")
+  }
+  return Ok({api_base_url: to_string(api_base_url), bot_token: to_string(bot_token)})
+}
+
+fn __slack_api_url(api_base_url, method) {
+  let trimmed = trim(to_string(api_base_url))
+  if trimmed.ends_with("/") {
+    return trimmed[0:len(trimmed) - 1] + "/" + method
+  }
+  return trimmed + "/" + method
+}

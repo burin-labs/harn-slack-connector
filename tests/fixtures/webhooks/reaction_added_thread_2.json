@@ -1,0 +1,1 @@
+{"token":"legacy-token","team_id":"T123","api_app_id":"A123","event":{"type":"reaction_added","user":"U888","reaction":"eyes","item_user":"U333","item":{"type":"message","channel":"C111","ts":"1713650002.000300"},"event_ts":"1713650201.000200"},"type":"event_callback","event_id":"Ev-reaction-2","event_time":1713650201}

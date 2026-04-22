@@ -1,0 +1,43 @@
+import { call } from "../src/lib"
+
+pipeline default() {
+  http_mock_clear()
+  let base = "https://slack.test/api"
+  let token = "xoxb-test-token"
+  http_mock(
+    "POST",
+    base + "/*",
+    {status: 200, body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000100\"}", headers: {}},
+  )
+  let posted = call("chat.postMessage", {api_base_url: base, bot_token: token, channel: "C111", text: "hello"})
+  assert_eq(posted.ok, true, "postMessage ok")
+  assert_eq(posted.channel, "C111", "postMessage response channel")
+  call(
+    "chat.update",
+    {api_base_url: base, bot_token: token, channel: "C111", ts: "1.1", text: "updated"},
+  )
+  call("chat.delete", {api_base_url: base, bot_token: token, channel: "C111", ts: "1.1"})
+  call("conversations.history", {api_base_url: base, bot_token: token, channel: "C111", limit: 2})
+  call("conversations.replies", {api_base_url: base, bot_token: token, channel: "C111", ts: "1.1"})
+  call("users.info", {api_base_url: base, bot_token: token, user_id: "U111"})
+  let calls = http_mock_calls()
+  assert_eq(len(calls), 6, "all required outbound methods dispatched")
+  assert_eq(calls[0].method, "POST", "post uses POST")
+  assert_eq(calls[0].url, base + "/chat.postMessage", "post URL")
+  assert_eq(calls[0].headers.Authorization, "Bearer " + token, "authorization header")
+  assert_eq(json_parse(calls[0].body).text, "hello", "post body text")
+  assert_eq(calls[5].url, base + "/users.info", "users.info URL")
+  assert_eq(json_parse(calls[5].body).user, "U111", "users.info user_id normalized")
+  http_mock_clear()
+  http_mock(
+    "POST",
+    base + "/chat.postMessage",
+    {status: 200, body: "{\"ok\":false,\"error\":\"channel_not_found\"}", headers: {}},
+  )
+  let slack_error = call("chat.postMessage", {api_base_url: base, bot_token: token, channel: "missing", text: "hello"})
+  assert(is_err(slack_error), "ok false becomes Err")
+  assert_eq(unwrap_err(slack_error).message, "channel_not_found", "ok false error")
+  let unsupported = call("reactions.add", {api_base_url: base, bot_token: token})
+  assert(is_err(unsupported), "unsupported method rejected")
+  assert_eq(unwrap_err(unsupported).code, "method_not_found", "unsupported method code")
+}

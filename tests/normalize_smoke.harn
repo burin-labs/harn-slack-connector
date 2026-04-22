@@ -1,0 +1,62 @@
+import { normalize_inbound, shutdown } from "../src/lib"
+import { assert_slack_interface, fixture_body, signed_raw, slack_headers } from "./helpers"
+
+pipeline default() {
+  let secret = "test-signing-secret"
+  let ts = to_int(timestamp())
+  assert_slack_interface()
+  let url_body = fixture_body("url_verification")
+  let url_result = normalize_inbound(signed_raw(secret, url_body, ts))
+  assert_eq(url_result.immediate_response.status, 200, "url verification status")
+  assert_eq(url_result.immediate_response.body, "challenge-abc-123", "url verification challenge")
+  assert_eq(url_result.immediate_response.content_type, "text/plain", "url verification content type")
+  assert(url_result.event == nil, "url verification skips event")
+  let event_body = fixture_body("message_channel_1")
+  let event_result = normalize_inbound(signed_raw(secret, event_body, ts))
+  assert_eq(event_result.immediate_response.status, 200, "event callback ack")
+  assert_eq(event_result.immediate_response.body, "", "event callback empty ack")
+  assert_eq(event_result.event.event_type, "message", "message event type")
+  assert_eq(event_result.event.resource_id, "C111/1713650000.000100", "message resource id")
+  let tampered = normalize_inbound(
+    {
+    signing_secret: secret,
+    body_text: event_body + " ",
+    headers: slack_headers(secret, event_body, ts),
+    now: ts,
+  },
+  )
+  assert(is_err(tampered), "tampered body rejects")
+  assert_eq(unwrap_err(tampered).code, "invalid_signature", "tampered body error")
+  let missing_signature = normalize_inbound(
+    {
+    signing_secret: secret,
+    body_text: event_body,
+    headers: {["x-slack-request-timestamp"]: to_string(ts)},
+    now: ts,
+  },
+  )
+  assert(is_err(missing_signature), "missing signature rejects")
+  assert_eq(unwrap_err(missing_signature).code, "missing_signature", "missing signature error")
+  let expired_ts = ts - 301
+  let expired = normalize_inbound(
+    {
+    signing_secret: secret,
+    body_text: event_body,
+    headers: slack_headers(secret, event_body, expired_ts),
+    now: ts,
+  },
+  )
+  assert(is_err(expired), "expired timestamp rejects")
+  assert_eq(unwrap_err(expired).code, "expired_timestamp", "expired timestamp error")
+  let wrong_secret = normalize_inbound(
+    {
+    signing_secret: "wrong-secret",
+    body_text: event_body,
+    headers: slack_headers(secret, event_body, ts),
+    now: ts,
+  },
+  )
+  assert(is_err(wrong_secret), "wrong secret rejects")
+  assert_eq(unwrap_err(wrong_secret).code, "invalid_signature", "wrong secret error")
+  shutdown()
+}

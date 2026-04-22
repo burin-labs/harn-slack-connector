@@ -1,0 +1,42 @@
+import {
+  activate,
+  call,
+  init,
+  kinds,
+  normalize_inbound,
+  payload_schema,
+  provider_id,
+  shutdown,
+} from "../src/lib"
+
+pub fn slack_headers(secret, body, ts) {
+  let basestring = "v0:" + to_string(ts) + ":" + body
+  return {
+    ["x-slack-request-timestamp"]: to_string(ts),
+    ["x-slack-signature"]: "v0=" + hmac_sha256(secret, basestring),
+  }
+}
+
+pub fn signed_raw(secret, body, ts, extra = nil) {
+  return extra ?? {}
+    + {signing_secret: secret, body_text: body, headers: slack_headers(secret, body, ts), now: ts}
+}
+
+pub fn fixture_body(name) {
+  return read_file(source_dir() + "/fixtures/webhooks/" + name + ".json")
+}
+
+pub fn fixture_raw(name, secret, ts, extra = nil) {
+  return signed_raw(secret, fixture_body(name), ts, extra)
+}
+
+pub fn assert_slack_interface() {
+  shutdown()
+  assert_eq(provider_id(), "slack", "provider id")
+  assert_eq(kinds()[0], "webhook", "webhook kind")
+  assert_eq(payload_schema().name, "SlackEventPayload", "payload schema name")
+  let initialized = init({signing_secret: "test-secret", include_bot_messages: false})
+  assert(initialized.initialized == true, "init stores state")
+  let activated = activate([{id: "primary", path: "/slack/events", secrets: {signing_secret: "test-secret"}}])
+  assert_eq(activated.bindings, 1, "activate counts bindings")
+}

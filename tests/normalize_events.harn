@@ -1,0 +1,65 @@
+import { normalize_inbound, shutdown } from "../src/lib"
+import { fixture_raw } from "./helpers"
+
+fn assert_event(name, expected_type, expected_resource, expected_user, expected_text) {
+  let secret = "event-secret"
+  let ts = to_int(timestamp())
+  let result = normalize_inbound(fixture_raw(name, secret, ts))
+  assert_eq(result.immediate_response.status, 200, name + " ack")
+  assert_eq(result.event.event_type, expected_type, name + " type")
+  assert_eq(result.event.resource_id, expected_resource, name + " resource")
+  assert_eq(result.event.user.id, expected_user, name + " user")
+  assert_eq(result.event.text, expected_text, name + " text")
+  assert(result.event.raw.type == expected_type, name + " keeps raw event")
+}
+
+pipeline default() {
+  assert_event("message_channel_1", "message", "C111/1713650000.000100", "U111", "hello channel")
+  assert_event("message_im_2", "message", "D222/1713650001.000200", "U222", "hello dm")
+  assert_event("message_thread_3", "message", "C111/1713650002.000300", "U333", "thread reply")
+  assert_event(
+    "app_mention_channel_1",
+    "app_mention",
+    "C111/1713650100.000100",
+    "U444",
+    "<@B123> deploy?",
+  )
+  assert_event(
+    "app_mention_thread_2",
+    "app_mention",
+    "C222/1713650101.000200",
+    "U555",
+    "<@B123> summarize this",
+  )
+  assert_event(
+    "app_mention_shared_3",
+    "app_mention",
+    "C333/1713650102.000300",
+    "U666",
+    "<@B123> from shared channel",
+  )
+  assert_event(
+    "reaction_added_message_1",
+    "reaction_added",
+    "C111/1713650000.000100",
+    "U777",
+    "thumbsup",
+  )
+  assert_event("reaction_added_thread_2", "reaction_added", "C111/1713650002.000300", "U888", "eyes")
+  assert_event(
+    "reaction_added_file_3",
+    "reaction_added",
+    "C444/1713650202.000300",
+    "U999",
+    "white_check_mark",
+  )
+  let secret = "event-secret"
+  let ts = to_int(timestamp())
+  let ignored_bot = normalize_inbound(fixture_raw("message_bot", secret, ts))
+  assert_eq(ignored_bot.immediate_response.status, 200, "bot message ack")
+  assert(ignored_bot.event == nil, "bot messages are ignored by default")
+  let included_bot = normalize_inbound(fixture_raw("message_bot", secret, ts, {include_bot_messages: true}))
+  assert_eq(included_bot.event.event_type, "message", "bot opt-in event type")
+  assert_eq(included_bot.event.text, "bot echo", "bot opt-in text")
+  shutdown()
+}
