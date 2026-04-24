@@ -8,5 +8,53 @@ repository = "https://github.com/burin-labs/harn-slack-connector"
 [exports]
 default = "src/lib.harn"
 
+[[providers]]
+id = "slack"
+connector = { harn = "src/lib.harn" }
+
 # Harn-side package dependencies live here. This package currently has none.
 [dependencies]
+
+[connector_contract]
+version = 1
+
+[[connector_contract.fixtures]]
+provider = "slack"
+name = "url verification ack"
+kind = "webhook"
+headers = { "content-type" = "application/json", "x-slack-request-timestamp" = "1713659999", "x-slack-signature" = "v0=c6f5a5568a39a9cb38d1cc2e406ec157ea18f0468d278125104bdb44a5c7858c" }
+metadata = { signing_secret = "event-secret", now = 1713659999, binding_id = "contract-slack-webhook", binding_version = 1, path = "/slack/events" }
+body = '''{"token":"legacy-token","challenge":"challenge-abc-123","type":"url_verification"}'''
+expect_type = "immediate_response"
+expect_event_count = 0
+
+[[connector_contract.fixtures]]
+provider = "slack"
+name = "signed message event"
+kind = "webhook"
+headers = { "content-type" = "application/json", "x-slack-request-timestamp" = "1713659999", "x-slack-signature" = "v0=900d7f33e65ec96e13d1f654e91a9cd0ce2b24ce036fde434835d2fcfd6c2def" }
+metadata = { signing_secret = "event-secret", now = 1713659999, binding_id = "contract-slack-webhook", binding_version = 1, path = "/slack/events" }
+body = '''{"token":"legacy-token","team_id":"T123","api_app_id":"A123","event":{"client_msg_id":"m-1","type":"message","text":"hello channel","user":"U111","ts":"1713650000.000100","team":"T123","channel":"C111","event_ts":"1713650000.000100","channel_type":"channel"},"type":"event_callback","event_id":"Ev-message-1","event_time":1713650000}'''
+expect_type = "event"
+expect_kind = "message"
+expect_event_count = 1
+
+[[connector_contract.fixtures]]
+provider = "slack"
+name = "unsupported event reject"
+kind = "webhook"
+headers = { "content-type" = "application/json", "x-slack-request-timestamp" = "1713659999", "x-slack-signature" = "v0=581f2593bc5ecd79ae526965ac418a80a0816bc4983073b282cd1ac18ce57dd1" }
+metadata = { signing_secret = "event-secret", now = 1713659999, binding_id = "contract-slack-webhook", binding_version = 1, path = "/slack/events" }
+body = '''{"token":"legacy-token","team_id":"T123","api_app_id":"A123","event":{"type":"app_home_opened","user":"U111","channel":"D111","event_ts":"1713650400.000100"},"type":"event_callback","event_id":"Ev-unsupported","event_time":1713650400}'''
+expect_type = "reject"
+expect_event_count = 0
+
+[[connector_contract.fixtures]]
+provider = "slack"
+name = "signature failure reject"
+kind = "webhook"
+headers = { "content-type" = "application/json", "x-slack-request-timestamp" = "1713659999", "x-slack-signature" = "v0=0000000000000000000000000000000000000000000000000000000000000000" }
+metadata = { signing_secret = "event-secret", now = 1713659999, binding_id = "contract-slack-webhook", binding_version = 1, path = "/slack/events" }
+body = '''{"token":"legacy-token","team_id":"T123","api_app_id":"A123","event":{"client_msg_id":"m-1","type":"message","text":"hello channel","user":"U111","ts":"1713650000.000100","team":"T123","channel":"C111","event_ts":"1713650000.000100","channel_type":"channel"},"type":"event_callback","event_id":"Ev-message-1","event_time":1713650000}'''
+expect_type = "reject"
+expect_event_count = 0

@@ -1,7 +1,5 @@
 let SLACK_PROVIDER_ID = "slack"
 
-let SLACK_STATE_KEY = "harn-slack-connector.state"
-
 let SLACK_API_BASE_URL = "https://slack.com/api"
 
 let SLACK_SIGNATURE_WINDOW_SECONDS = 300
@@ -14,6 +12,8 @@ let SLACK_OUTBOUND_METHODS = [
   "conversations.replies",
   "users.info",
 ]
+
+var SLACK_STATE = {initialized: false, active: false, bindings: {}, ctx: {}}
 
 /** Return this connector's Harn provider id. */
 pub fn provider_id() {
@@ -28,10 +28,18 @@ pub fn kinds() {
 /** Return the canonical normalized Slack event payload schema. */
 pub fn payload_schema() {
   return {
-    name: "SlackEventPayload",
+    harn_schema_name: "SlackEventPayload",
+    json_schema: {
     type: "object",
-    required: ["event_type", "resource_id", "channel", "user", "occurred_at", "raw"],
+    required: ["type", "event", "event_type", "resource_id", "channel", "user", "raw"],
+    additionalProperties: true,
     properties: {
+    type: {type: "string", enum: ["event_callback"]},
+    event_id: {type: ["string", "null"]},
+    event_time: {type: ["integer", "number", "null"]},
+    team_id: {type: ["string", "null"]},
+    api_app_id: {type: ["string", "null"]},
+    event: {type: "object"},
     event_type: {type: "string", enum: ["message", "app_mention", "reaction_added"]},
     resource_id: {type: "string"},
     channel: {type: "string"},
@@ -43,8 +51,9 @@ pub fn payload_schema() {
   },
     text: {type: ["string", "null"]},
     reaction: {type: ["string", "null"]},
-    occurred_at: {type: ["string", "int", "float", "null"]},
+    occurred_at: {type: ["string", "integer", "number", "null"]},
     raw: {type: "object"},
+  },
   },
   }
 }
@@ -79,7 +88,7 @@ pub fn activate(bindings = []) {
 
 /** Clear connector lifecycle state. */
 pub fn shutdown() {
-  store_delete(SLACK_STATE_KEY)
+  SLACK_STATE = {initialized: false, active: false, bindings: {}, ctx: {}}
   return {provider: SLACK_PROVIDER_ID, active: false}
 }
 
@@ -95,26 +104,37 @@ pub fn normalize_inbound(raw) {
   let headers = raw?.headers ?? {}
   let verified = __verify_slack_signature(raw, headers, body_text)
   if is_err(verified) {
-    return verified
+    return __reject(unwrap_err(verified), 403)
   }
   let parsed = try {
     json_parse(body_text)
   }
   if is_err(parsed) {
-    return __err("invalid_json", "slack payload body is not valid JSON")
+    return __reject({code: "invalid_json", message: "slack payload body is not valid JSON"}, 400)
   }
   let payload = unwrap(parsed)
   if payload?.type == "url_verification" {
     return {
-      immediate_response: {status: 200, body: payload?.challenge ?? "", content_type: "text/plain"},
-      event: nil,
+      type: "immediate_response",
+      immediate_response: {
+      status: 200,
+      body: payload?.challenge ?? "",
+      headers: {["content-type"]: "text/plain; charset=utf-8"},
+    },
     }
   }
   let normalized = __normalize_event_callback(payload, raw)
   if is_err(normalized) {
-    return normalized
+    return __reject(unwrap_err(normalized), 400)
   }
-  return {immediate_response: {status: 200, body: "", content_type: "text/plain"}, event: normalized}
+  let event = unwrap(normalized)
+  if event == nil {
+    return {
+      type: "immediate_response",
+      immediate_response: {status: 200, body: "", headers: {["content-type"]: "text/plain; charset=utf-8"}},
+    }
+  }
+  return {type: "event", event: event}
 }
 
 @complexity(allow)
@@ -171,16 +191,27 @@ pub fn call(method, args = {}) {
 }
 
 fn __state() {
-  return store_get(SLACK_STATE_KEY) ?? {initialized: false, active: false, bindings: {}, ctx: {}}
+  return SLACK_STATE
 }
 
 fn __set_state(state) {
-  store_set(SLACK_STATE_KEY, state)
+  SLACK_STATE = state
   return state
 }
 
 fn __err(code, message) {
   return Err({code: code, message: message})
+}
+
+fn __reject(error, status = 400) {
+  return {
+    type: "reject",
+    reject: {
+    status: status,
+    headers: {["content-type"]: "application/json; charset=utf-8"},
+    body: {error: error?.code ?? "rejected", message: error?.message ?? to_string(error)},
+  },
+  }
 }
 
 fn __header(headers, name) {
@@ -194,7 +225,13 @@ fn __header(headers, name) {
 }
 
 fn __signing_secret(raw) {
-  let direct = raw?.signing_secret ?? raw?.secret ?? raw?.config?.signing_secret ?? raw?.secrets?.signing_secret
+  let direct = raw?.signing_secret
+    ?? raw?.secret
+    ?? raw?.metadata?.signing_secret
+    ?? raw?.metadata?.secret
+    ?? raw?.config?.signing_secret
+    ?? raw?.secrets?.signing_secret
+    ?? raw?.metadata?.secrets?.signing_secret
   if direct != nil && trim(to_string(direct)) != "" {
     return to_string(direct)
   }
@@ -207,12 +244,18 @@ fn __signing_secret(raw) {
   let binding_id = raw?.metadata?.binding_id ?? raw?.binding_id
   if binding_id != nil {
     let binding = bindings.get(binding_id)
-    return binding?.signing_secret ?? binding?.secrets?.signing_secret ?? binding?.config?.signing_secret
+    return binding?.signing_secret
+      ?? binding?.secrets?.signing_secret
+      ?? binding?.config?.signing_secret
+      ?? binding?.config?.secrets?.signing_secret
   }
   let values = bindings.values()
   if len(values) == 1 {
     let binding = values[0]
-    return binding?.signing_secret ?? binding?.secrets?.signing_secret ?? binding?.config?.signing_secret
+    return binding?.signing_secret
+      ?? binding?.secrets?.signing_secret
+      ?? binding?.config?.signing_secret
+      ?? binding?.config?.secrets?.signing_secret
   }
   return nil
 }
@@ -240,7 +283,7 @@ fn __verify_slack_signature(raw, headers, body_text) {
     return __err("invalid_timestamp", "x-slack-request-timestamp is not an integer")
   }
   let ts = unwrap(parsed_ts)
-  let now = raw?.now ?? timestamp()
+  let now = raw?.now ?? raw?.metadata?.now ?? timestamp()
   if abs(now - ts) > SLACK_SIGNATURE_WINDOW_SECONDS {
     return __err(
       "expired_timestamp",
@@ -278,24 +321,32 @@ fn __normalize_event_callback(payload, raw) {
   if event_type == "message" || event_type == "app_mention" {
     let channel = event?.channel ?? ""
     let ts = event?.ts ?? event?.event_ts ?? ""
-    return {
+    let resource_id = channel + "/" + ts
+    let normalized_payload = __payload_with_normalized_fields(
+      payload,
+      {
       event_type: event_type,
-      resource_id: channel + "/" + ts,
+      resource_id: resource_id,
       channel: channel,
       thread_ts: event?.thread_ts ?? ts,
       user: {id: event?.user ?? "", name: event?.user_name ?? event?.username},
       text: event?.text ?? "",
       occurred_at: event?.event_ts ?? event?.ts ?? payload?.event_time,
       raw: event,
-    }
+    },
+    )
+    return __event_result(event_type, __dedupe_key(payload, event_type, resource_id), normalized_payload)
   }
   if event_type == "reaction_added" {
     let item = event?.item ?? {}
     let channel = item?.channel ?? event?.channel ?? ""
     let ts = item?.ts ?? event?.event_ts ?? ""
-    return {
-      event_type: "reaction_added",
-      resource_id: channel + "/" + ts,
+    let resource_id = channel + "/" + ts
+    let normalized_payload = __payload_with_normalized_fields(
+      payload,
+      {
+      event_type: event_type,
+      resource_id: resource_id,
       channel: channel,
       thread_ts: item?.ts,
       user: {id: event?.user ?? "", name: event?.user_name ?? event?.username},
@@ -303,9 +354,29 @@ fn __normalize_event_callback(payload, raw) {
       reaction: event?.reaction ?? "",
       occurred_at: event?.event_ts ?? payload?.event_time,
       raw: event,
-    }
+    },
+    )
+    return __event_result(event_type, __dedupe_key(payload, event_type, resource_id), normalized_payload)
   }
   return __err("unsupported_event", "unsupported Slack event type `" + to_string(event_type) + "`")
+}
+
+fn __event_result(kind, dedupe_key, payload) {
+  return {kind: kind, dedupe_key: dedupe_key, payload: payload, signature_status: {state: "verified"}}
+}
+
+fn __dedupe_key(payload, event_type, resource_id) {
+  let event_id = payload?.event_id
+  if event_id != nil && trim(to_string(event_id)) != "" {
+    return "slack:event:" + to_string(event_id)
+  }
+  let team = payload?.team_id ?? payload?.event?.team ?? "unknown-team"
+  return "slack:" + to_string(team) + ":" + event_type + ":" + resource_id
+}
+
+fn __payload_with_normalized_fields(payload, normalized) {
+  let base = payload ?? {}
+  return base + normalized
 }
 
 fn __outbound_config(args) {
