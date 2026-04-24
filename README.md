@@ -19,14 +19,11 @@ interface defined in
 
 ## Install
 
-Once Harn package management v0
-([harn#345](https://github.com/burin-labs/harn/issues/345)) lands:
-
 ```sh
-harn add github.com/burin-labs/harn-slack-connector@v0.1.0
+harn add github.com/burin-labs/harn-slack-connector@main
 ```
 
-Until then, depend on this repo via a path import:
+For local multi-repo development, a path dependency is still useful:
 
 ```toml
 [dependencies]
@@ -36,7 +33,7 @@ harn-slack-connector = { path = "../harn-slack-connector" }
 ## Usage
 
 ```harn
-import slack_connector from "harn-slack-connector"
+import slack_connector from "harn-slack-connector/default"
 
 trigger respond on slack {
   source = {

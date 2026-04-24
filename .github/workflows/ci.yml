@@ -68,3 +68,19 @@ jobs:
           for test in tests/*.harn; do
             harn run "${test}"
           done
+
+      - name: Package install smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke_root="$(mktemp -d)"
+          trap 'rm -rf "$smoke_root"' EXIT
+          cat > "$smoke_root/harn.toml" <<'EOF'
+          [package]
+          name = "harn-slack-connector-consumer-smoke"
+          version = "0.0.0"
+          EOF
+          cd "$smoke_root"
+          harn add "$GITHUB_WORKSPACE@HEAD"
+          printf 'import "harn-slack-connector/default"\n' > smoke.harn
+          harn check smoke.harn
