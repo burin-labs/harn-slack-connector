@@ -1,9 +1,5 @@
 # CLAUDE.md — harn-slack-connector
 
-**Read [SESSION_PROMPT.md](./SESSION_PROMPT.md) first.** It contains the
-pivot context, the connector interface contract, the 3-second response
-budget, and the v0 milestones.
-
 ## Quick repo conventions
 
 - File extension: `.harn`. Use `snake_case` for filenames.

@@ -57,9 +57,6 @@ trigger respond on slack {
 
 ## Development
 
-This repo is being built out by Claude Code sessions following a structured
-prompt. **Read [SESSION_PROMPT.md](./SESSION_PROMPT.md) before making changes.**
-
 Install the pinned Harn CLI from crates.io:
 
 ```sh
