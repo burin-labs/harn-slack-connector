@@ -9,9 +9,10 @@ outbound Web API calls.
 > [burin-labs/harn](https://github.com/burin-labs/harn). See the
 > [Pure-Harn Connectors Pivot epic #350](https://github.com/burin-labs/harn/issues/350).
 
-This is an **inbound + outbound** connector implementing the Harn Connector
-interface defined in
-[harn#346](https://github.com/burin-labs/harn/issues/346).
+This is an **inbound + outbound** connector implementing Harn Connector
+Contract v1. Its `payload_schema()` export returns the canonical
+`{ harn_schema_name, json_schema }` shape and `normalize_inbound(...)` returns
+the tagged `NormalizeResult` v1 variants used by Harn core.
 
 > Slack expects an HTTP response within **3 seconds** of delivery. The
 > Harn VM is plenty fast for the verify-and-ack path, but anything that
@@ -75,6 +76,7 @@ harn fmt --check src/lib.harn
 for test in tests/*.harn; do
   harn run "$test" || exit 1
 done
+harn connector check .
 ```
 
 ## License

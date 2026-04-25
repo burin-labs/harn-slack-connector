@@ -7,16 +7,43 @@ pipeline default() {
   assert_slack_interface()
   let url_body = fixture_body("url_verification")
   let url_result = normalize_inbound(signed_raw(secret, url_body, ts))
+  assert_eq(url_result.type, "immediate_response", "url verification result type")
   assert_eq(url_result.immediate_response.status, 200, "url verification status")
   assert_eq(url_result.immediate_response.body, "challenge-abc-123", "url verification challenge")
-  assert_eq(url_result.immediate_response.content_type, "text/plain", "url verification content type")
+  assert_eq(
+    url_result.immediate_response.headers["content-type"],
+    "text/plain; charset=utf-8",
+    "url verification content type",
+  )
   assert(url_result.event == nil, "url verification skips event")
   let event_body = fixture_body("message_channel_1")
   let event_result = normalize_inbound(signed_raw(secret, event_body, ts))
-  assert_eq(event_result.immediate_response.status, 200, "event callback ack")
-  assert_eq(event_result.immediate_response.body, "", "event callback empty ack")
-  assert_eq(event_result.event.event_type, "message", "message event type")
-  assert_eq(event_result.event.resource_id, "C111/1713650000.000100", "message resource id")
+  assert_eq(event_result.type, "event", "event callback result type")
+  assert_eq(event_result.event.kind, "message", "message event type")
+  assert_eq(event_result.event.dedupe_key, "slack:event:Ev-message-1", "message dedupe key")
+  assert_eq(event_result.event.payload.resource_id, "C111/1713650000.000100", "message resource id")
+  let retry_result = normalize_inbound(
+    signed_raw(
+    secret,
+    event_body,
+    ts,
+    {
+    headers: slack_headers(secret, event_body, ts)
+    + {["x-slack-retry-num"]: "1", ["x-slack-retry-reason"]: "http_timeout"},
+  },
+  ),
+  )
+  assert_eq(retry_result.type, "event", "retry result type")
+  assert_eq(
+    retry_result.event.dedupe_key,
+    event_result.event.dedupe_key,
+    "retry keeps deterministic dedupe",
+  )
+  let unsupported_body = "{\"token\":\"legacy-token\",\"team_id\":\"T123\",\"api_app_id\":\"A123\",\"event\":{\"type\":\"app_home_opened\",\"user\":\"U111\",\"channel\":\"D111\",\"event_ts\":\"1713650400.000100\"},\"type\":\"event_callback\",\"event_id\":\"Ev-unsupported\",\"event_time\":1713650400}"
+  let unsupported = normalize_inbound(signed_raw(secret, unsupported_body, ts))
+  assert_eq(unsupported.type, "reject", "unsupported event rejects")
+  assert_eq(unsupported.reject.status, 400, "unsupported event status")
+  assert_eq(unsupported.reject.body.error, "unsupported_event", "unsupported event error")
   let tampered = normalize_inbound(
     {
     signing_secret: secret,
@@ -25,8 +52,9 @@ pipeline default() {
     now: ts,
   },
   )
-  assert(is_err(tampered), "tampered body rejects")
-  assert_eq(unwrap_err(tampered).code, "invalid_signature", "tampered body error")
+  assert_eq(tampered.type, "reject", "tampered body rejects")
+  assert_eq(tampered.reject.status, 403, "tampered body status")
+  assert_eq(tampered.reject.body.error, "invalid_signature", "tampered body error")
   let missing_signature = normalize_inbound(
     {
     signing_secret: secret,
@@ -35,8 +63,8 @@ pipeline default() {
     now: ts,
   },
   )
-  assert(is_err(missing_signature), "missing signature rejects")
-  assert_eq(unwrap_err(missing_signature).code, "missing_signature", "missing signature error")
+  assert_eq(missing_signature.type, "reject", "missing signature rejects")
+  assert_eq(missing_signature.reject.body.error, "missing_signature", "missing signature error")
   let expired_ts = ts - 301
   let expired = normalize_inbound(
     {
@@ -46,8 +74,8 @@ pipeline default() {
     now: ts,
   },
   )
-  assert(is_err(expired), "expired timestamp rejects")
-  assert_eq(unwrap_err(expired).code, "expired_timestamp", "expired timestamp error")
+  assert_eq(expired.type, "reject", "expired timestamp rejects")
+  assert_eq(expired.reject.body.error, "expired_timestamp", "expired timestamp error")
   let wrong_secret = normalize_inbound(
     {
     signing_secret: "wrong-secret",
@@ -56,7 +84,7 @@ pipeline default() {
     now: ts,
   },
   )
-  assert(is_err(wrong_secret), "wrong secret rejects")
-  assert_eq(unwrap_err(wrong_secret).code, "invalid_signature", "wrong secret error")
+  assert_eq(wrong_secret.type, "reject", "wrong secret rejects")
+  assert_eq(wrong_secret.reject.body.error, "invalid_signature", "wrong secret error")
   shutdown()
 }
