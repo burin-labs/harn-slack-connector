@@ -30,31 +30,31 @@ pub fn payload_schema() {
   return {
     harn_schema_name: "SlackEventPayload",
     json_schema: {
-    type: "object",
-    required: ["type", "event", "event_type", "resource_id", "channel", "user", "raw"],
-    additionalProperties: true,
-    properties: {
-    type: {type: "string", enum: ["event_callback"]},
-    event_id: {type: ["string", "null"]},
-    event_time: {type: ["integer", "number", "null"]},
-    team_id: {type: ["string", "null"]},
-    api_app_id: {type: ["string", "null"]},
-    event: {type: "object"},
-    event_type: {type: "string", enum: ["message", "app_mention", "reaction_added"]},
-    resource_id: {type: "string"},
-    channel: {type: "string"},
-    thread_ts: {type: ["string", "null"]},
-    user: {
-    type: "object",
-    required: ["id"],
-    properties: {id: {type: "string"}, name: {type: ["string", "null"]}},
-  },
-    text: {type: ["string", "null"]},
-    reaction: {type: ["string", "null"]},
-    occurred_at: {type: ["string", "integer", "number", "null"]},
-    raw: {type: "object"},
-  },
-  },
+      type: "object",
+      required: ["type", "event", "event_type", "resource_id", "channel", "user", "raw"],
+      additionalProperties: true,
+      properties: {
+        type: {type: "string", enum: ["event_callback"]},
+        event_id: {type: ["string", "null"]},
+        event_time: {type: ["integer", "number", "null"]},
+        team_id: {type: ["string", "null"]},
+        api_app_id: {type: ["string", "null"]},
+        event: {type: "object"},
+        event_type: {type: "string", enum: ["message", "app_mention", "reaction_added"]},
+        resource_id: {type: "string"},
+        channel: {type: "string"},
+        thread_ts: {type: ["string", "null"]},
+        user: {
+          type: "object",
+          required: ["id"],
+          properties: {id: {type: "string"}, name: {type: ["string", "null"]}},
+        },
+        text: {type: ["string", "null"]},
+        reaction: {type: ["string", "null"]},
+        occurred_at: {type: ["string", "integer", "number", "null"]},
+        raw: {type: "object"},
+      },
+    },
   }
 }
 
@@ -117,10 +117,10 @@ pub fn normalize_inbound(raw) {
     return {
       type: "immediate_response",
       immediate_response: {
-      status: 200,
-      body: payload?.challenge ?? "",
-      headers: {["content-type"]: "text/plain; charset=utf-8"},
-    },
+        status: 200,
+        body: payload?.challenge ?? "",
+        headers: {["content-type"]: "text/plain; charset=utf-8"},
+      },
     }
   }
   let normalized = __normalize_event_callback(payload, raw)
@@ -160,12 +160,12 @@ pub fn call(method, args = {}) {
   }
   let response = try {
     http_post(
-    __slack_api_url(cfg.api_base_url, method),
-    json_stringify(body),
-    {
-    headers: {Authorization: "Bearer " + cfg.bot_token, ["Content-Type"]: "application/json; charset=utf-8"},
-  },
-  )
+      __slack_api_url(cfg.api_base_url, method),
+      json_stringify(body),
+      {
+        headers: {Authorization: "Bearer " + cfg.bot_token, ["Content-Type"]: "application/json; charset=utf-8"},
+      },
+    )
   }
   if is_err(response) {
     return __err("transport", to_string(unwrap_err(response)))
@@ -207,10 +207,10 @@ fn __reject(error, status = 400) {
   return {
     type: "reject",
     reject: {
-    status: status,
-    headers: {["content-type"]: "application/json; charset=utf-8"},
-    body: {error: error?.code ?? "rejected", message: error?.message ?? to_string(error)},
-  },
+      status: status,
+      headers: {["content-type"]: "application/json; charset=utf-8"},
+      body: {error: error?.code ?? "rejected", message: error?.message ?? to_string(error)},
+    },
   }
 }
 
@@ -325,15 +325,15 @@ fn __normalize_event_callback(payload, raw) {
     let normalized_payload = __payload_with_normalized_fields(
       payload,
       {
-      event_type: event_type,
-      resource_id: resource_id,
-      channel: channel,
-      thread_ts: event?.thread_ts ?? ts,
-      user: {id: event?.user ?? "", name: event?.user_name ?? event?.username},
-      text: event?.text ?? "",
-      occurred_at: event?.event_ts ?? event?.ts ?? payload?.event_time,
-      raw: event,
-    },
+        event_type: event_type,
+        resource_id: resource_id,
+        channel: channel,
+        thread_ts: event?.thread_ts ?? ts,
+        user: {id: event?.user ?? "", name: event?.user_name ?? event?.username},
+        text: event?.text ?? "",
+        occurred_at: event?.event_ts ?? event?.ts ?? payload?.event_time,
+        raw: event,
+      },
     )
     return __event_result(event_type, __dedupe_key(payload, event_type, resource_id), normalized_payload)
   }
@@ -345,16 +345,16 @@ fn __normalize_event_callback(payload, raw) {
     let normalized_payload = __payload_with_normalized_fields(
       payload,
       {
-      event_type: event_type,
-      resource_id: resource_id,
-      channel: channel,
-      thread_ts: item?.ts,
-      user: {id: event?.user ?? "", name: event?.user_name ?? event?.username},
-      text: event?.reaction ?? "",
-      reaction: event?.reaction ?? "",
-      occurred_at: event?.event_ts ?? payload?.event_time,
-      raw: event,
-    },
+        event_type: event_type,
+        resource_id: resource_id,
+        channel: channel,
+        thread_ts: item?.ts,
+        user: {id: event?.user ?? "", name: event?.user_name ?? event?.username},
+        text: event?.reaction ?? "",
+        reaction: event?.reaction ?? "",
+        occurred_at: event?.event_ts ?? payload?.event_time,
+        raw: event,
+      },
     )
     return __event_result(event_type, __dedupe_key(payload, event_type, resource_id), normalized_payload)
   }

@@ -24,14 +24,14 @@ pipeline default() {
   assert_eq(event_result.event.payload.resource_id, "C111/1713650000.000100", "message resource id")
   let retry_result = normalize_inbound(
     signed_raw(
-    secret,
-    event_body,
-    ts,
-    {
-    headers: slack_headers(secret, event_body, ts)
-    + {["x-slack-retry-num"]: "1", ["x-slack-retry-reason"]: "http_timeout"},
-  },
-  ),
+      secret,
+      event_body,
+      ts,
+      {
+        headers: slack_headers(secret, event_body, ts)
+          + {["x-slack-retry-num"]: "1", ["x-slack-retry-reason"]: "http_timeout"},
+      },
+    ),
   )
   assert_eq(retry_result.type, "event", "retry result type")
   assert_eq(
@@ -46,43 +46,43 @@ pipeline default() {
   assert_eq(unsupported.reject.body.error, "unsupported_event", "unsupported event error")
   let tampered = normalize_inbound(
     {
-    signing_secret: secret,
-    body_text: event_body + " ",
-    headers: slack_headers(secret, event_body, ts),
-    now: ts,
-  },
+      signing_secret: secret,
+      body_text: event_body + " ",
+      headers: slack_headers(secret, event_body, ts),
+      now: ts,
+    },
   )
   assert_eq(tampered.type, "reject", "tampered body rejects")
   assert_eq(tampered.reject.status, 403, "tampered body status")
   assert_eq(tampered.reject.body.error, "invalid_signature", "tampered body error")
   let missing_signature = normalize_inbound(
     {
-    signing_secret: secret,
-    body_text: event_body,
-    headers: {["x-slack-request-timestamp"]: to_string(ts)},
-    now: ts,
-  },
+      signing_secret: secret,
+      body_text: event_body,
+      headers: {["x-slack-request-timestamp"]: to_string(ts)},
+      now: ts,
+    },
   )
   assert_eq(missing_signature.type, "reject", "missing signature rejects")
   assert_eq(missing_signature.reject.body.error, "missing_signature", "missing signature error")
   let expired_ts = ts - 301
   let expired = normalize_inbound(
     {
-    signing_secret: secret,
-    body_text: event_body,
-    headers: slack_headers(secret, event_body, expired_ts),
-    now: ts,
-  },
+      signing_secret: secret,
+      body_text: event_body,
+      headers: slack_headers(secret, event_body, expired_ts),
+      now: ts,
+    },
   )
   assert_eq(expired.type, "reject", "expired timestamp rejects")
   assert_eq(expired.reject.body.error, "expired_timestamp", "expired timestamp error")
   let wrong_secret = normalize_inbound(
     {
-    signing_secret: "wrong-secret",
-    body_text: event_body,
-    headers: slack_headers(secret, event_body, ts),
-    now: ts,
-  },
+      signing_secret: "wrong-secret",
+      body_text: event_body,
+      headers: slack_headers(secret, event_body, ts),
+      now: ts,
+    },
   )
   assert_eq(wrong_secret.type, "reject", "wrong secret rejects")
   assert_eq(wrong_secret.reject.body.error, "invalid_signature", "wrong secret error")
