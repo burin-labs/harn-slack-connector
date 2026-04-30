@@ -34,12 +34,17 @@ pipeline default() {
     ),
   )
   assert_eq(retry_result.type, "event", "retry result type")
+  assert_eq(retry_result.event.payload.retry.is_retry, true, "retry flag")
+  assert_eq(retry_result.event.payload.retry.num, 1, "retry num")
+  assert_eq(retry_result.event.payload.retry.reason, "http_timeout", "retry reason")
+  assert_eq(retry_result.event.payload.metrics.slack_retry_delivery, 1, "retry metric")
+  assert_eq(retry_result.event.headers["X-Slack-Retry-Num"], "1", "canonical retry num header")
   assert_eq(
     retry_result.event.dedupe_key,
     event_result.event.dedupe_key,
     "retry keeps deterministic dedupe",
   )
-  let unsupported_body = "{\"token\":\"legacy-token\",\"team_id\":\"T123\",\"api_app_id\":\"A123\",\"event\":{\"type\":\"app_home_opened\",\"user\":\"U111\",\"channel\":\"D111\",\"event_ts\":\"1713650400.000100\"},\"type\":\"event_callback\",\"event_id\":\"Ev-unsupported\",\"event_time\":1713650400}"
+  let unsupported_body = "{\"token\":\"legacy-token\",\"team_id\":\"T123\",\"api_app_id\":\"A123\",\"event\":{\"type\":\"workflow_step_execute\",\"user\":\"U111\",\"channel\":\"D111\",\"event_ts\":\"1713650400.000100\"},\"type\":\"event_callback\",\"event_id\":\"Ev-unsupported\",\"event_time\":1713650400}"
   let unsupported = normalize_inbound(signed_raw(secret, unsupported_body, ts))
   assert_eq(unsupported.type, "reject", "unsupported event rejects")
   assert_eq(unsupported.reject.status, 400, "unsupported event status")

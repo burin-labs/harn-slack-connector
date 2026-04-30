@@ -5,6 +5,7 @@ let SLACK_API_BASE_URL = "https://slack.com/api"
 let SLACK_SIGNATURE_WINDOW_SECONDS = 300
 
 let SLACK_OUTBOUND_METHODS = [
+  "apps.connections.open",
   "chat.postMessage",
   "chat.update",
   "chat.delete",
@@ -40,7 +41,10 @@ pub fn payload_schema() {
         team_id: {type: ["string", "null"]},
         api_app_id: {type: ["string", "null"]},
         event: {type: "object"},
-        event_type: {type: "string", enum: ["message", "app_mention", "reaction_added"]},
+        event_type: {
+          type: "string",
+          enum: ["message", "app_mention", "reaction_added", "app_home_opened", "assistant_thread_started"],
+        },
         resource_id: {type: "string"},
         channel: {type: "string"},
         thread_ts: {type: ["string", "null"]},
@@ -51,6 +55,8 @@ pub fn payload_schema() {
         },
         text: {type: ["string", "null"]},
         reaction: {type: ["string", "null"]},
+        retry: {type: "object"},
+        metrics: {type: "object"},
         occurred_at: {type: ["string", "integer", "number", "null"]},
         raw: {type: "object"},
       },
@@ -137,22 +143,151 @@ pub fn normalize_inbound(raw) {
   return {type: "event", event: event}
 }
 
+/** Open a Slack Socket Mode WebSocket using an app-level token, or a supplied mock URL in tests. */
+pub fn socket_mode_connect(args = {}) {
+  let socket_url = args?.socket_url ?? args?.url
+  var resolved_url = socket_url
+  if resolved_url == nil || trim(to_string(resolved_url)) == "" {
+    let config = __socket_mode_config(args ?? {})
+    if is_err(config) {
+      return config
+    }
+    let cfg = unwrap(config)
+    let response = try {
+      http_post(
+        __slack_api_url(cfg.api_base_url, "apps.connections.open"),
+        "{}",
+        {
+          headers: {Authorization: "Bearer " + cfg.app_token, ["Content-Type"]: "application/json; charset=utf-8"},
+        },
+      )
+    }
+    if is_err(response) {
+      return __err("transport", to_string(unwrap_err(response)))
+    }
+    let http_response = unwrap(response)
+    let decoded = try {
+      json_parse(http_response.body)
+    }
+    if is_err(decoded) {
+      return __err("invalid_response", "Slack apps.connections.open returned invalid JSON")
+    }
+    let payload = unwrap(decoded)
+    if http_response.status < 200 || http_response.status >= 300 || !(payload?.ok ?? false) {
+      return __err(
+        "slack_error",
+        payload?.error
+          ?? ("Slack apps.connections.open failed with status " + to_string(http_response.status)),
+      )
+    }
+    resolved_url = payload?.url
+  }
+  if resolved_url == nil || trim(to_string(resolved_url)) == "" {
+    return __err("missing_socket_url", "Slack Socket Mode requires socket_url or apps.connections.open url")
+  }
+  let options = {
+    timeout_ms: args?.timeout_ms ?? 10000,
+    max_messages: args?.max_messages ?? 1000,
+    max_message_bytes: args?.max_message_bytes ?? 1048576,
+  }
+  let socket = websocket_connect(to_string(resolved_url), options)
+  return {
+    provider: SLACK_PROVIDER_ID,
+    transport: "socket_mode",
+    socket: socket,
+    url: to_string(resolved_url),
+  }
+}
+
+/**
+ * Receive one Slack Socket Mode envelope, ack it immediately, and normalize its Events API payload.
+ */
+pub fn socket_mode_receive(connection, options = {}) {
+  let socket = __socket_handle(connection)
+  if socket == nil || trim(to_string(socket)) == "" {
+    return __err("missing_socket", "Slack Socket Mode receive requires a socket handle")
+  }
+  let message = websocket_receive(to_string(socket), options?.timeout_ms ?? 1000)
+  if message == nil || message?.type == "timeout" || message?.type == "close" {
+    return {type: message?.type ?? "closed", message: message}
+  }
+  if message?.type != "text" {
+    return {type: "ignored", reason: "non_text_socket_message", message: message}
+  }
+  let decoded = try {
+    json_parse(message.data ?? "")
+  }
+  if is_err(decoded) {
+    return __err("invalid_socket_envelope", "Slack Socket Mode envelope was not valid JSON")
+  }
+  let envelope = unwrap(decoded)
+  let acked = __socket_mode_ack(to_string(socket), envelope)
+  if is_err(acked) {
+    return acked
+  }
+  let payload = envelope?.payload
+  if payload == nil {
+    return {type: "control", envelope: envelope, acked: unwrap(acked)}
+  }
+  let normalized = __normalize_event_callback(payload, options ?? {})
+  if is_err(normalized) {
+    return __reject(unwrap_err(normalized), 400)
+  }
+  var event = unwrap(normalized)
+  if event == nil {
+    return {
+      type: "immediate_response",
+      immediate_response: {status: 200, body: "", headers: {["content-type"]: "text/plain; charset=utf-8"}},
+      envelope_id: envelope?.envelope_id,
+      acked: unwrap(acked),
+    }
+  }
+  event.payload = event.payload + {transport: "socket_mode", envelope_id: envelope?.envelope_id}
+  return {type: "event", event: event, envelope_id: envelope?.envelope_id, acked: unwrap(acked)}
+}
+
+/** Ack a Slack Socket Mode envelope by id. */
+pub fn socket_mode_ack(connection, envelope_id, payload = nil) {
+  let socket = __socket_handle(connection)
+  if socket == nil || trim(to_string(socket)) == "" {
+    return __err("missing_socket", "Slack Socket Mode ack requires a socket handle")
+  }
+  var body = {envelope_id: envelope_id}
+  if payload != nil {
+    body["payload"] = payload
+  }
+  websocket_send(to_string(socket), json_stringify(body), {})
+  return {acked: true, envelope_id: envelope_id}
+}
+
 @complexity(allow)
 /** Dispatch a supported Slack Web API method with JSON body semantics. */
 pub fn call(method, args = {}) {
   if !contains(SLACK_OUTBOUND_METHODS, method) {
     return __err("method_not_found", "slack connector does not implement outbound method `" + method + "`")
   }
-  let config = __outbound_config(args ?? {})
-  if is_err(config) {
-    return config
+  var cfg = nil
+  if method == "apps.connections.open" {
+    let config = __socket_mode_config(args ?? {})
+    if is_err(config) {
+      return config
+    }
+    let socket_cfg = unwrap(config)
+    cfg = {api_base_url: socket_cfg.api_base_url, bot_token: socket_cfg.app_token}
+  } else {
+    let config = __outbound_config(args ?? {})
+    if is_err(config) {
+      return config
+    }
+    cfg = unwrap(config)
   }
-  let cfg = unwrap(config)
   var body = args ?? {}
   body.remove("api_base_url")
+  body.remove("app_token")
   body.remove("bot_token")
   body.remove("token")
   body.remove("bot_token_secret")
+  body.remove("app_token_secret")
   body.remove("secrets")
   if method == "users.info" && body?.user == nil && body?.user_id != nil {
     body["user"] = body.user_id
@@ -222,6 +357,51 @@ fn __header(headers, name) {
     }
   }
   return nil
+}
+
+fn __canonical_slack_headers(headers) {
+  var canonical = headers ?? {}
+  for pair in [
+    {raw: "content-type", canonical: "Content-Type"},
+    {raw: "x-slack-signature", canonical: "X-Slack-Signature"},
+    {raw: "x-slack-request-timestamp", canonical: "X-Slack-Request-Timestamp"},
+    {raw: "x-slack-retry-num", canonical: "X-Slack-Retry-Num"},
+    {raw: "x-slack-retry-reason", canonical: "X-Slack-Retry-Reason"},
+  ] {
+    let value = __header(headers, pair.raw)
+    if value != nil && value != "" {
+      canonical[pair.canonical] = value
+    }
+  }
+  return canonical
+}
+
+fn __slack_retry(headers) {
+  let retry_num_raw = __header(headers, "x-slack-retry-num")
+  let retry_reason = __header(headers, "x-slack-retry-reason")
+  var retry_num = nil
+  if retry_num_raw != nil && retry_num_raw != "" {
+    let parsed = try {
+      to_int(retry_num_raw)
+    }
+    if !is_err(parsed) {
+      retry_num = unwrap(parsed)
+    }
+  }
+  return {
+    is_retry: (retry_num_raw != nil && retry_num_raw != "") || (retry_reason != nil && retry_reason != ""),
+    num: retry_num,
+    num_raw: retry_num_raw,
+    reason: retry_reason,
+    headers: {["x-slack-retry-num"]: retry_num_raw, ["x-slack-retry-reason"]: retry_reason},
+  }
+}
+
+fn __slack_metrics(retry_info) {
+  if retry_info?.is_retry ?? false {
+    return {slack_retry_delivery: 1, slack_first_delivery: 0, slack_retry_num: retry_info?.num ?? 0}
+  }
+  return {slack_retry_delivery: 0, slack_first_delivery: 1, slack_retry_num: 0}
 }
 
 fn __signing_secret(raw) {
@@ -318,6 +498,7 @@ fn __normalize_event_callback(payload, raw) {
   if event_type == "message" && event?.bot_id != nil && !__include_bot_messages(raw) {
     return nil
   }
+  let retry_info = __slack_retry(raw?.headers ?? {})
   if event_type == "message" || event_type == "app_mention" {
     let channel = event?.channel ?? ""
     let ts = event?.ts ?? event?.event_ts ?? ""
@@ -331,11 +512,18 @@ fn __normalize_event_callback(payload, raw) {
         thread_ts: event?.thread_ts ?? ts,
         user: {id: event?.user ?? "", name: event?.user_name ?? event?.username},
         text: event?.text ?? "",
+        retry: retry_info,
+        metrics: __slack_metrics(retry_info),
         occurred_at: event?.event_ts ?? event?.ts ?? payload?.event_time,
         raw: event,
       },
     )
-    return __event_result(event_type, __dedupe_key(payload, event_type, resource_id), normalized_payload)
+    return __event_result(
+      event_type,
+      __dedupe_key(payload, event_type, resource_id),
+      normalized_payload,
+      __canonical_slack_headers(raw?.headers ?? {}),
+    )
   }
   if event_type == "reaction_added" {
     let item = event?.item ?? {}
@@ -352,17 +540,91 @@ fn __normalize_event_callback(payload, raw) {
         user: {id: event?.user ?? "", name: event?.user_name ?? event?.username},
         text: event?.reaction ?? "",
         reaction: event?.reaction ?? "",
+        retry: retry_info,
+        metrics: __slack_metrics(retry_info),
         occurred_at: event?.event_ts ?? payload?.event_time,
         raw: event,
       },
     )
-    return __event_result(event_type, __dedupe_key(payload, event_type, resource_id), normalized_payload)
+    return __event_result(
+      event_type,
+      __dedupe_key(payload, event_type, resource_id),
+      normalized_payload,
+      __canonical_slack_headers(raw?.headers ?? {}),
+    )
+  }
+  if event_type == "app_home_opened" {
+    let channel = event?.channel ?? ""
+    let ts = event?.event_ts ?? payload?.event_time ?? ""
+    var resource_base = event?.user ?? ""
+    if channel != "" {
+      resource_base = channel
+    }
+    let resource_id = resource_base + "/" + to_string(ts)
+    let normalized_payload = __payload_with_normalized_fields(
+      payload,
+      {
+        event_type: event_type,
+        resource_id: resource_id,
+        channel: channel,
+        thread_ts: nil,
+        user: {id: event?.user ?? "", name: event?.user_name ?? event?.username},
+        text: "",
+        tab: event?.tab,
+        view: event?.view,
+        retry: retry_info,
+        metrics: __slack_metrics(retry_info),
+        occurred_at: event?.event_ts ?? payload?.event_time,
+        raw: event,
+      },
+    )
+    return __event_result(
+      event_type,
+      __dedupe_key(payload, event_type, resource_id),
+      normalized_payload,
+      __canonical_slack_headers(raw?.headers ?? {}),
+    )
+  }
+  if event_type == "assistant_thread_started" {
+    let assistant_thread = event?.assistant_thread ?? {}
+    let channel = assistant_thread?.channel_id ?? assistant_thread?.context?.channel_id ?? event?.channel ?? ""
+    let thread_ts = assistant_thread?.thread_ts ?? event?.event_ts
+    let resource_id = channel + "/" + to_string(thread_ts ?? "")
+    let normalized_payload = __payload_with_normalized_fields(
+      payload,
+      {
+        event_type: event_type,
+        resource_id: resource_id,
+        channel: channel,
+        thread_ts: thread_ts,
+        user: {id: assistant_thread?.user_id ?? event?.user ?? "", name: event?.user_name ?? event?.username},
+        text: "",
+        assistant_thread: assistant_thread,
+        context: assistant_thread?.context,
+        retry: retry_info,
+        metrics: __slack_metrics(retry_info),
+        occurred_at: event?.event_ts ?? payload?.event_time,
+        raw: event,
+      },
+    )
+    return __event_result(
+      event_type,
+      __dedupe_key(payload, event_type, resource_id),
+      normalized_payload,
+      __canonical_slack_headers(raw?.headers ?? {}),
+    )
   }
   return __err("unsupported_event", "unsupported Slack event type `" + to_string(event_type) + "`")
 }
 
-fn __event_result(kind, dedupe_key, payload) {
-  return {kind: kind, dedupe_key: dedupe_key, payload: payload, signature_status: {state: "verified"}}
+fn __event_result(kind, dedupe_key, payload, headers = nil) {
+  return {
+    kind: kind,
+    dedupe_key: dedupe_key,
+    payload: payload,
+    headers: headers,
+    signature_status: {state: "verified"},
+  }
 }
 
 fn __dedupe_key(payload, event_type, resource_id) {
@@ -381,11 +643,35 @@ fn __payload_with_normalized_fields(payload, normalized) {
 
 fn __outbound_config(args) {
   let api_base_url = args?.api_base_url ?? env_or("SLACK_API_BASE_URL", SLACK_API_BASE_URL)
-  let bot_token = args?.bot_token ?? args?.token ?? args?.secrets?.bot_token ?? env("SLACK_BOT_TOKEN")
+  let bot_token = args?.bot_token
+    ?? args?.token
+    ?? args?.secrets?.bot_token
+    ?? env("SLACK_BOT_TOKEN")
   if bot_token == nil || trim(to_string(bot_token)) == "" {
     return __err("missing_bot_token", "slack connector requires bot_token")
   }
   return Ok({api_base_url: to_string(api_base_url), bot_token: to_string(bot_token)})
+}
+
+fn __socket_mode_config(args) {
+  let api_base_url = args?.api_base_url ?? env_or("SLACK_API_BASE_URL", SLACK_API_BASE_URL)
+  let app_token = args?.app_token ?? args?.token ?? args?.secrets?.app_token ?? env("SLACK_APP_TOKEN")
+  if app_token == nil || trim(to_string(app_token)) == "" {
+    return __err("missing_app_token", "Slack Socket Mode requires app_token")
+  }
+  return Ok({api_base_url: to_string(api_base_url), app_token: to_string(app_token)})
+}
+
+fn __socket_handle(connection) {
+  return connection?.socket ?? connection?.id ?? connection
+}
+
+fn __socket_mode_ack(socket, envelope) {
+  let envelope_id = envelope?.envelope_id
+  if envelope_id == nil || trim(to_string(envelope_id)) == "" {
+    return {acked: false, envelope_id: nil}
+  }
+  return socket_mode_ack(socket, envelope_id)
 }
 
 fn __slack_api_url(api_base_url, method) {

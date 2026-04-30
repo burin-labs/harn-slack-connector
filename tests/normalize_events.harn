@@ -57,6 +57,14 @@ pipeline default() {
     "U999",
     "white_check_mark",
   )
+  assert_event("app_home_opened", "app_home_opened", "D123HOME/1713650400.000100", "U123HOME", "")
+  assert_event(
+    "assistant_thread_started",
+    "assistant_thread_started",
+    "D123ASSIST/1729999327.187299",
+    "U123ASSIST",
+    "",
+  )
   let secret = "event-secret"
   let ts = to_int(timestamp())
   let ignored_bot = normalize_inbound(fixture_raw("message_bot", secret, ts))

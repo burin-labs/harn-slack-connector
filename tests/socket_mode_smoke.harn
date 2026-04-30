@@ -1,0 +1,42 @@
+import { shutdown, socket_mode_connect, socket_mode_receive } from "../src/lib"
+import { fixture_body } from "./helpers"
+
+pipeline default() {
+  transport_mock_clear()
+  let payload = json_parse(fixture_body("app_mention_channel_1"))
+  let envelope = {envelope_id: "env-1", type: "events_api", accepts_response_payload: false, payload: payload}
+  websocket_mock("wss://socket.slack.test/app/*", {messages: [json_stringify(envelope)], echo: true})
+  let conn = socket_mode_connect({socket_url: "wss://socket.slack.test/app/test", timeout_ms: 0})
+  assert_eq(conn.transport, "socket_mode", "socket mode transport")
+  let result = socket_mode_receive(conn, {timeout_ms: 0})
+  assert_eq(result.type, "event", "socket mode event result")
+  assert_eq(result.envelope_id, "env-1", "socket mode envelope id")
+  assert_eq(result.acked.acked, true, "socket mode ack flag")
+  assert_eq(result.event.kind, "app_mention", "socket mode normalizes event kind")
+  assert_eq(result.event.payload.transport, "socket_mode", "payload transport")
+  assert_eq(result.event.payload.envelope_id, "env-1", "payload envelope id")
+  assert_eq(result.event.payload.resource_id, "C111/1713650100.000100", "socket mode resource")
+  let calls = transport_mock_calls()
+  assert_eq(calls[0].kind, "websocket_connect", "socket mode opens websocket")
+  assert_eq(calls[1].kind, "websocket_send", "socket mode sends ack")
+  assert_eq(json_parse(calls[1].data).envelope_id, "env-1", "socket mode ack envelope")
+  websocket_close(conn.socket)
+  transport_mock_clear()
+  http_mock_clear()
+  let api_base = "https://slack.test/api"
+  let opened_url = "wss://socket.slack.test/app/opened"
+  http_mock(
+    "POST",
+    api_base + "/apps.connections.open",
+    {status: 200, body: "{\"ok\":true,\"url\":\"" + opened_url + "\"}", headers: {}},
+  )
+  websocket_mock(opened_url, {messages: [], echo: false})
+  let opened = socket_mode_connect({api_base_url: api_base, app_token: "xapp-test", timeout_ms: 0})
+  assert_eq(opened.url, opened_url, "socket mode opens via apps.connections.open")
+  let http_calls = http_mock_calls()
+  assert_eq(http_calls[0].headers.authorization, "[redacted]", "app token header redacted")
+  websocket_close(opened.socket)
+  http_mock_clear()
+  transport_mock_clear()
+  shutdown()
+}

@@ -18,8 +18,8 @@ pub fn slack_headers(secret, body, ts) {
 }
 
 pub fn signed_raw(secret, body, ts, extra = nil) {
-  return extra ?? {}
-    + {signing_secret: secret, body_text: body, headers: slack_headers(secret, body, ts), now: ts}
+  let raw = {signing_secret: secret, body_text: body, headers: slack_headers(secret, body, ts), now: ts}
+  return raw + extra ?? {}
 }
 
 pub fn fixture_body(name) {
