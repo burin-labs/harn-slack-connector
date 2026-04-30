@@ -24,7 +24,7 @@ pipeline default() {
   assert_eq(len(calls), 6, "all required outbound methods dispatched")
   assert_eq(calls[0].method, "POST", "post uses POST")
   assert_eq(calls[0].url, base + "/chat.postMessage", "post URL")
-  assert_eq(calls[0].headers.Authorization, "Bearer " + token, "authorization header")
+  assert_eq(calls[0].headers.authorization, "[redacted]", "authorization header is redacted")
   assert_eq(json_parse(calls[0].body).text, "hello", "post body text")
   assert_eq(calls[5].url, base + "/users.info", "users.info URL")
   assert_eq(json_parse(calls[5].body).user, "U111", "users.info user_id normalized")
