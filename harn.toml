@@ -1,6 +1,6 @@
 [package]
 name = "harn-slack-connector"
-version = "0.0.0"
+version = "0.1.0"
 description = "Pure-Harn Slack Events API connector: signature verification, URL handshake, Web API dispatch."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/burin-labs/harn-slack-connector"
@@ -37,17 +37,48 @@ metadata = { signing_secret = "event-secret", now = 1713659999, binding_id = "co
 body = '''{"token":"legacy-token","team_id":"T123","api_app_id":"A123","event":{"client_msg_id":"m-1","type":"message","text":"hello channel","user":"U111","ts":"1713650000.000100","team":"T123","channel":"C111","event_ts":"1713650000.000100","channel_type":"channel"},"type":"event_callback","event_id":"Ev-message-1","event_time":1713650000}'''
 expect_type = "event"
 expect_kind = "message"
+expect_dedupe_key = "slack:event:Ev-message-1"
+expect_signature_state = "verified"
+expect_payload_contains = { event = "message", event_id = "Ev-message-1", api_app_id = "A123", team_id = "T123", channel_id = "C111", user_id = "U111", event_ts = "1713650000.000100", channel_type = "channel", channel = "C111", user = "U111", text = "hello channel", ts = "1713650000.000100" }
 expect_event_count = 1
 
 [[connector_contract.fixtures]]
 provider = "slack"
 name = "unsupported event reject"
 kind = "webhook"
-headers = { "content-type" = "application/json", "x-slack-request-timestamp" = "1713659999", "x-slack-signature" = "v0=581f2593bc5ecd79ae526965ac418a80a0816bc4983073b282cd1ac18ce57dd1" }
+headers = { "content-type" = "application/json", "x-slack-request-timestamp" = "1713659999", "x-slack-signature" = "v0=56fe8d967430047e5ddab4f3053c1c1a2d2b601beb56d9e492371d9c8fc21ecf" }
 metadata = { signing_secret = "event-secret", now = 1713659999, binding_id = "contract-slack-webhook", binding_version = 1, path = "/slack/events" }
-body = '''{"token":"legacy-token","team_id":"T123","api_app_id":"A123","event":{"type":"app_home_opened","user":"U111","channel":"D111","event_ts":"1713650400.000100"},"type":"event_callback","event_id":"Ev-unsupported","event_time":1713650400}'''
+body = '''{"token":"legacy-token","team_id":"T123","api_app_id":"A123","event":{"type":"workflow_step_execute","user":"U111","channel":"D111","event_ts":"1713650400.000100"},"type":"event_callback","event_id":"Ev-unsupported","event_time":1713650400}'''
 expect_type = "reject"
 expect_event_count = 0
+
+[[connector_contract.fixtures]]
+provider = "slack"
+name = "app home opened legacy payload shape"
+kind = "webhook"
+headers = { "content-type" = "application/json", "x-slack-request-timestamp" = "1713659999", "x-slack-signature" = "v0=24db6e2f7441bd374cc9d12b40f9ef8c1b08639aa9dbc520996e8ed43a14b089" }
+metadata = { signing_secret = "event-secret", now = 1713659999, binding_id = "contract-slack-webhook", binding_version = 1, path = "/slack/events" }
+body = '''{"token":"legacy-token","team_id":"T123","api_app_id":"A123","event":{"type":"app_home_opened","user":"U123HOME","channel":"D123HOME","event_ts":"1713650400.000100","tab":"home","view":{"id":"V123HOME","team_id":"T123","type":"home"}},"type":"event_callback","event_id":"Ev-app-home-1","event_time":1713650400}'''
+expect_type = "event"
+expect_kind = "app_home_opened"
+expect_dedupe_key = "slack:event:Ev-app-home-1"
+expect_signature_state = "verified"
+expect_payload_contains = { event = "app_home_opened", event_id = "Ev-app-home-1", api_app_id = "A123", team_id = "T123", channel_id = "D123HOME", user_id = "U123HOME", event_ts = "1713650400.000100", user = "U123HOME", channel = "D123HOME", tab = "home" }
+expect_event_count = 1
+
+[[connector_contract.fixtures]]
+provider = "slack"
+name = "assistant thread started legacy payload shape"
+kind = "webhook"
+headers = { "content-type" = "application/json", "x-slack-request-timestamp" = "1713659999", "x-slack-signature" = "v0=ebacf07807f48999c4ad31ae4dea832a4189c24cf7bb6409faf2d067e4b84e4b" }
+metadata = { signing_secret = "event-secret", now = 1713659999, binding_id = "contract-slack-webhook", binding_version = 1, path = "/slack/events" }
+body = '''{"token":"legacy-token","team_id":"T123","api_app_id":"A123","event":{"type":"assistant_thread_started","assistant_thread":{"user_id":"U123ASSIST","context":{"channel_id":"C123ASSIST","team_id":"T123","enterprise_id":"E123"},"channel_id":"D123ASSIST","thread_ts":"1729999327.187299"},"event_ts":"1715873754.429808"},"type":"event_callback","event_id":"Ev-assistant-1","event_time":1715873754}'''
+expect_type = "event"
+expect_kind = "assistant_thread_started"
+expect_dedupe_key = "slack:event:Ev-assistant-1"
+expect_signature_state = "verified"
+expect_payload_contains = { event = "assistant_thread_started", event_id = "Ev-assistant-1", api_app_id = "A123", team_id = "T123", channel_id = "D123ASSIST", user_id = "U123ASSIST", event_ts = "1715873754.429808", thread_ts = "1729999327.187299" }
+expect_event_count = 1
 
 [[connector_contract.fixtures]]
 provider = "slack"

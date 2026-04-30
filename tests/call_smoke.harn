@@ -40,4 +40,14 @@ pipeline default() {
   let unsupported = call("reactions.add", {api_base_url: base, bot_token: token})
   assert(is_err(unsupported), "unsupported method rejected")
   assert_eq(unwrap_err(unsupported).code, "method_not_found", "unsupported method code")
+  let app_token_for_bot_method = call(
+    "chat.postMessage",
+    {api_base_url: base, app_token: "xapp-test-token", channel: "C111", text: "hello"},
+  )
+  assert(is_err(app_token_for_bot_method), "app token is not accepted for bot-token methods")
+  assert_eq(
+    unwrap_err(app_token_for_bot_method).code,
+    "missing_bot_token",
+    "bot token still required",
+  )
 }

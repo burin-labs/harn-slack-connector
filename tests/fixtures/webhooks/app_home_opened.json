@@ -1,0 +1,20 @@
+{
+  "token": "legacy-token",
+  "team_id": "T123",
+  "api_app_id": "A123",
+  "event": {
+    "type": "app_home_opened",
+    "user": "U123HOME",
+    "channel": "D123HOME",
+    "event_ts": "1713650400.000100",
+    "tab": "home",
+    "view": {
+      "id": "V123HOME",
+      "team_id": "T123",
+      "type": "home"
+    }
+  },
+  "type": "event_callback",
+  "event_id": "Ev-app-home-1",
+  "event_time": 1713650400
+}

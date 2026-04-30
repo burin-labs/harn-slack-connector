@@ -1,0 +1,22 @@
+{
+  "token": "legacy-token",
+  "team_id": "T123",
+  "api_app_id": "A123",
+  "event": {
+    "type": "assistant_thread_started",
+    "assistant_thread": {
+      "user_id": "U123ASSIST",
+      "context": {
+        "channel_id": "C123ASSIST",
+        "team_id": "T123",
+        "enterprise_id": "E123"
+      },
+      "channel_id": "D123ASSIST",
+      "thread_ts": "1729999327.187299"
+    },
+    "event_ts": "1715873754.429808"
+  },
+  "type": "event_callback",
+  "event_id": "Ev-assistant-1",
+  "event_time": 1715873754
+}
