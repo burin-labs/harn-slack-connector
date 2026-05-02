@@ -1,46 +1,20 @@
-# CLAUDE.md — harn-slack-connector
+# CLAUDE.md - harn-slack-connector
 
-## Quick repo conventions
+Pure-Harn Slack connector package for Events API, Socket Mode, and Web API calls.
 
-- File extension: `.harn`. Use `snake_case` for filenames.
-- Repo directories use `kebab-case`.
-- Entry point: `src/lib.harn`.
-- Tests live under `tests/`. Recorded webhook fixtures live under
-  `tests/fixtures/webhooks/`.
+Shared Harn connector authoring rules live in the canonical guide:
 
-## How to test
+- https://github.com/burin-labs/harn/blob/main/docs/src/connectors/authoring.md
 
-Install the pinned Harn CLI from crates.io:
+Keep this file limited to provider-specific notes and local hazards. Add shared connector guidance
+to the Harn guide first.
 
-```sh
-cargo install harn-cli --version "$(cat .harn-version)" --locked
-harn --version
-```
+## Provider Notes
 
-Run checks from the repo root:
-
-```sh
-harn check src/lib.harn
-harn lint src/lib.harn
-harn fmt --check src/lib.harn
-for test in tests/*.harn; do
-  harn run "$test" || exit 1
-done
-```
-
-## Reference Rust impl
-
-The existing 986-LOC Rust connector at
-`/Users/ksinder/projects/harn/crates/harn-vm/src/connectors/slack/mod.rs`
-is the **behavior spec**. Port semantics from there.
-
-## Upstream conventions
-
-For general Harn coding conventions and project layout, defer to
-[`/Users/ksinder/projects/harn/CLAUDE.md`](/Users/ksinder/projects/harn/CLAUDE.md).
-
-## Don't
-
-- Don't perform any network I/O inside `normalize_inbound`. Slack's
-  3-second budget makes that a footgun.
-- Don't hand-edit `LICENSE-*` or `.gitignore`.
+- Slack Events API expects an HTTP response within 3 seconds. Keep `normalize_inbound` CPU-only:
+  verify HMAC, parse JSON, and return the ack/result without outbound network work.
+- Events API signatures use `x-slack-signature` plus `x-slack-request-timestamp`; enforce the replay
+  window before accepting a signed payload.
+- URL verification returns an immediate response with the challenge. Socket Mode receives the same
+  inner payload shape after envelope ack.
+- Bot tokens are for Web API calls; app-level `xapp-` tokens are for Socket Mode connections.
