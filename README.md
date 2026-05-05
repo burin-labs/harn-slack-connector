@@ -30,7 +30,7 @@ harn-slack-connector = { path = "../harn-slack-connector" }
 ## Events API Usage
 
 ```harn
-import slack_connector from "harn-slack-connector/default"
+import { call } from "harn-slack-connector/default"
 
 trigger respond on slack {
   source = {
@@ -41,7 +41,7 @@ trigger respond on slack {
   }
   on event {
     if event.event_type == "app_mention" {
-      slack_connector.call("chat.postMessage", {
+      call("chat.postMessage", {
         channel: event.channel,
         thread_ts: event.thread_ts,
         text: "Hello from Harn!",
@@ -57,17 +57,17 @@ Socket Mode uses a Slack app-level token (`xapp-...`) to open the WebSocket and
 the same normalization path as Events API for the inner payload.
 
 ```harn
-import slack_connector from "harn-slack-connector/default"
+import { call, socket_mode_connect, socket_mode_receive } from "harn-slack-connector/default"
 
 pipeline socket_mode_worker() {
-  let conn = slack_connector.socket_mode_connect({
+  let conn = socket_mode_connect({
     app_token: env("SLACK_APP_TOKEN"),
     max_messages: 1000,
   })
-  loop {
-    let next = slack_connector.socket_mode_receive(conn, {timeout_ms: 30000})
+  while true {
+    let next = socket_mode_receive(conn, {timeout_ms: 30000})
     if next.type == "event" && next.event.kind == "app_mention" {
-      slack_connector.call("chat.postMessage", {
+      call("chat.postMessage", {
         channel: next.event.payload.channel,
         thread_ts: next.event.payload.thread_ts,
         text: "Hello from Socket Mode!",
