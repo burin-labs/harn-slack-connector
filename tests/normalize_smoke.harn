@@ -29,7 +29,7 @@ pipeline default() {
       ts,
       {
         headers: slack_headers(secret, event_body, ts)
-          + {["x-slack-retry-num"]: "1", ["x-slack-retry-reason"]: "http_timeout"},
+          + {"x-slack-retry-num": "1", "x-slack-retry-reason": "http_timeout"},
       },
     ),
   )
@@ -64,7 +64,7 @@ pipeline default() {
     {
       signing_secret: secret,
       body_text: event_body,
-      headers: {["x-slack-request-timestamp"]: to_string(ts)},
+      headers: {"x-slack-request-timestamp": to_string(ts)},
       now: ts,
     },
   )

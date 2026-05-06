@@ -12,8 +12,8 @@ import {
 pub fn slack_headers(secret, body, ts) {
   let basestring = "v0:" + to_string(ts) + ":" + body
   return {
-    ["x-slack-request-timestamp"]: to_string(ts),
-    ["x-slack-signature"]: "v0=" + hmac_sha256(secret, basestring),
+    "x-slack-request-timestamp": to_string(ts),
+    "x-slack-signature": "v0=" + hmac_sha256(secret, basestring),
   }
 }
 
