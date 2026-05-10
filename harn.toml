@@ -12,6 +12,37 @@ default = "src/lib.harn"
 id = "slack"
 connector = { harn = "src/lib.harn" }
 
+[providers.setup]
+auth_type = "oauth2"
+flow = "slack-app"
+required_scopes = ["app_mentions:read", "chat:write"]
+required_secrets = ["slack/signing-secret", "slack/bot-token", "slack/app-token"]
+setup_command = ["harn", "connect", "slack"]
+validation_command = ["harn", "connect", "status", "--connector", "slack", "--json"]
+
+[[providers.setup.health_checks]]
+id = "signing-secret"
+kind = "secret"
+secret = "slack/signing-secret"
+
+[[providers.setup.health_checks]]
+id = "bot-token"
+kind = "secret"
+secret = "slack/bot-token"
+
+[[providers.setup.health_checks]]
+id = "app-token"
+kind = "secret"
+secret = "slack/app-token"
+
+[providers.setup.recovery]
+missing_auth = "Store slack/signing-secret, slack/bot-token, and slack/app-token before enabling Slack bindings."
+expired_credentials = "Rotate the Slack app tokens, update stored secrets, and rerun Slack validation."
+revoked_credentials = "Reinstall or reauthorize the Slack app, then replace slack/bot-token and slack/app-token."
+missing_scopes = "Grant the bot and app scopes required by the configured Slack events and Web API calls."
+inaccessible_resource = "Invite or authorize the Slack app for the target workspace, channels, and conversations."
+transient_provider_outage = "Retry after Slack API, Events API, or Socket Mode endpoints are healthy."
+
 # Harn-side package dependencies live here. This package currently has none.
 [dependencies]
 
