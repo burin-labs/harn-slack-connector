@@ -1,7 +1,7 @@
 [package]
 name = "harn-slack-connector"
 version = "0.1.0"
-description = "Pure-Harn Slack Events API connector: signature verification, URL handshake, Web API dispatch."
+description = "Pure-Harn Slack connector: Events API signatures, URL handshake, source-rich triage normalization, Socket Mode, and Web API dispatch."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/burin-labs/harn-slack-connector"
 

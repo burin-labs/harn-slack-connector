@@ -1,0 +1,78 @@
+import { normalize_inbound, shutdown } from "../src/lib"
+import { fixture_raw } from "./helpers"
+
+fn ref_by_kind(refs, kind) {
+  for ref in refs {
+    if ref.kind == kind {
+      return ref
+    }
+  }
+  return nil
+}
+
+pipeline default() {
+  let secret = "triage-secret"
+  let ts = to_int(timestamp())
+  let message = normalize_inbound(fixture_raw("message_channel_1", secret, ts))
+  let payload = message.event.payload
+  assert_eq(payload.source.kind, "message", "message source kind")
+  assert_eq(
+    payload.source.url,
+    "https://slack.com/app_redirect?channel=C111&team=T123",
+    "message source URL",
+  )
+  assert_eq(payload.source.deep_link, "slack://channel?team=T123&id=C111", "message deep link")
+  assert_eq(payload.source.permalink_request.method, "chat.getPermalink", "permalink method")
+  assert_eq(
+    payload.source.permalink_request.args.message_ts,
+    "1713650000.000100",
+    "permalink message ts",
+  )
+  assert_eq(payload.source.dedupe_key, "slack:message:T123:C111:1713650000.000100", "source dedupe")
+  assert_eq(payload.triage.schema, "harn.triage.source.v1", "triage source schema")
+  assert_eq(payload.triage.dedupe_key, payload.source.dedupe_key, "triage uses source dedupe")
+  assert_eq(payload.triage.delivery_dedupe_key, message.event.dedupe_key, "delivery dedupe retained")
+  assert_eq(payload.triage.content_text, "hello channel", "triage content text")
+  assert_eq(payload.provider_raw.envelope.event.type, "message", "raw envelope retained separately")
+  assert_eq(payload.provider_raw.event.type, "message", "raw event retained separately")
+  assert_eq(ref_by_kind(payload.source_refs, "channel").channel_id, "C111", "channel ref")
+  assert_eq(ref_by_kind(payload.source_refs, "member").user_id, "U111", "member ref")
+  assert_eq(
+    payload.triage.action_intents[3].provider_method,
+    "chat.postMessage",
+    "reply intent method",
+  )
+  assert_eq(payload.triage.action_intents[3].requires_approval, true, "reply intent approval gate")
+  assert_eq(payload.triage.source_timestamp, "1713650000.000100", "triage source timestamp")
+  let thread = normalize_inbound(fixture_raw("message_thread_3", secret, ts))
+  let thread_payload = thread.event.payload
+  assert_eq(thread_payload.source.kind, "thread_message", "thread source kind")
+  assert_eq(thread_payload.source.thread_root_ts, "1713650000.000100", "thread root ts")
+  assert_eq(
+    ref_by_kind(thread_payload.source_refs, "thread").thread_ts,
+    "1713650000.000100",
+    "thread ref",
+  )
+  assert_eq(
+    ref_by_kind(thread_payload.source_refs, "thread").permalink_request.args.message_ts,
+    "1713650000.000100",
+    "thread permalink root",
+  )
+  let dm = normalize_inbound(fixture_raw("message_im_2", secret, ts))
+  assert_eq(dm.event.payload.source.kind, "direct_message", "dm source kind")
+  assert_eq(dm.event.payload.triage.privacy.classification, "private", "dm privacy")
+  assert(contains(dm.event.payload.triage.privacy.flags, "direct_message"), "dm privacy flag")
+  let mention = normalize_inbound(fixture_raw("app_mention_channel_1", secret, ts))
+  assert_eq(mention.event.payload.source.kind, "mention", "mention source kind")
+  assert_eq(mention.event.payload.triage.mentions[0], "B123", "mention ids")
+  assert_eq(mention.event.payload.triage.priority_hints.mention, true, "mention priority hint")
+  let file_reaction = normalize_inbound(fixture_raw("reaction_added_file_3", secret, ts))
+  assert_eq(file_reaction.event.payload.source.kind, "file_reaction", "file reaction kind")
+  assert_eq(ref_by_kind(file_reaction.event.payload.source_refs, "file").file_id, "F123", "file ref")
+  assert_eq(
+    ref_by_kind(file_reaction.event.payload.source_refs, "file").deep_link,
+    "slack://file?team=T123&id=F123",
+    "file deep link",
+  )
+  shutdown()
+}
