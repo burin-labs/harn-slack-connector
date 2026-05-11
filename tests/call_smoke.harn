@@ -13,6 +13,10 @@ pipeline default() {
   assert_eq(posted.ok, true, "postMessage ok")
   assert_eq(posted.channel, "C111", "postMessage response channel")
   call(
+    "chat.getPermalink",
+    {api_base_url: base, bot_token: token, channel: "C111", message_ts: "1713650000.000100"},
+  )
+  call(
     "chat.update",
     {api_base_url: base, bot_token: token, channel: "C111", ts: "1.1", text: "updated"},
   )
@@ -21,13 +25,15 @@ pipeline default() {
   call("conversations.replies", {api_base_url: base, bot_token: token, channel: "C111", ts: "1.1"})
   call("users.info", {api_base_url: base, bot_token: token, user_id: "U111"})
   let calls = http_mock_calls()
-  assert_eq(len(calls), 6, "all required outbound methods dispatched")
+  assert_eq(len(calls), 7, "all required outbound methods dispatched")
   assert_eq(calls[0].method, "POST", "post uses POST")
   assert_eq(calls[0].url, base + "/chat.postMessage", "post URL")
   assert_eq(calls[0].headers.authorization, "[redacted]", "authorization header is redacted")
   assert_eq(json_parse(calls[0].body).text, "hello", "post body text")
-  assert_eq(calls[5].url, base + "/users.info", "users.info URL")
-  assert_eq(json_parse(calls[5].body).user, "U111", "users.info user_id normalized")
+  assert_eq(calls[1].url, base + "/chat.getPermalink", "permalink URL")
+  assert_eq(json_parse(calls[1].body).message_ts, "1713650000.000100", "permalink message ts")
+  assert_eq(calls[6].url, base + "/users.info", "users.info URL")
+  assert_eq(json_parse(calls[6].body).user, "U111", "users.info user_id normalized")
   http_mock_clear()
   http_mock(
     "POST",
@@ -37,6 +43,25 @@ pipeline default() {
   let slack_error = call("chat.postMessage", {api_base_url: base, bot_token: token, channel: "missing", text: "hello"})
   assert(is_err(slack_error), "ok false becomes Err")
   assert_eq(unwrap_err(slack_error).message, "channel_not_found", "ok false error")
+  http_mock_clear()
+  http_mock(
+    "POST",
+    base + "/conversations.history",
+    {
+      status: 200,
+      body: "{\"ok\":false,\"error\":\"missing_scope\",\"needed\":\"channels:history\",\"provided\":\"chat:write\"}",
+      headers: {},
+    },
+  )
+  let missing_scope = call("conversations.history", {api_base_url: base, bot_token: token, channel: "C111"})
+  assert(is_err(missing_scope), "missing scope is explicit")
+  assert_eq(unwrap_err(missing_scope).code, "missing_scope", "missing scope code")
+  assert_eq(
+    unwrap_err(missing_scope).details.needed,
+    "channels:history",
+    "missing scope needed detail",
+  )
+  http_mock_clear()
   let unsupported = call("reactions.add", {api_base_url: base, bot_token: token})
   assert(is_err(unsupported), "unsupported method rejected")
   assert_eq(unwrap_err(unsupported).code, "method_not_found", "unsupported method code")

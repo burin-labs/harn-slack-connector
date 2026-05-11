@@ -3,9 +3,10 @@
 Pure-Harn Slack connector for the Harn orchestrator. It verifies inbound Events
 API signatures, handles URL verification, normalizes Slack events to the Harn
 `TriggerEvent` shape, supports Slack Socket Mode receive/ack loops, and
-dispatches outbound Web API calls.
+dispatches outbound Web API calls. Normalized events include a source-rich
+triage adapter payload for Harn and Burin Home inbox workflows.
 
-This package implements Harn Connector Contract v1. Use Harn CLI `0.7.50` or
+This package implements Harn Connector Contract v1. Use Harn CLI `0.8.9` or
 newer; this repository pins the tested CLI in `.harn-version`. The canonical
 connector contract reference is the Harn trigger quick reference:
 https://harnlang.com/docs/llm/harn-triggers-quickref.html
@@ -98,6 +99,8 @@ Required bot scopes depend on outbound calls and subscribed events:
   message events in those surfaces.
 - `reactions:read` for `reaction_added`.
 - `chat:write` for `chat.postMessage`, `chat.update`, and `chat.delete`.
+- `chat.getPermalink` uses the event `channel` and `ts` to hydrate exact message
+  permalinks outside the webhook hot path.
 - `channels:history`/`groups:history`/`im:history`/`mpim:history` as applicable
   for `conversations.history` and `conversations.replies`.
 - `users:read` for `users.info`.
@@ -157,6 +160,26 @@ The payload also includes `metrics.slack_retry_delivery` and
 `metrics.slack_first_delivery` counters as normalized values for downstream
 ingress metrics. Dedupe keys stay based on Slack `event_id`, so retries do not
 dispatch duplicate work when the Harn inbox is configured with `event.dedupe_key`.
+
+Each normalized event also carries:
+
+- `payload.source`: canonical Slack source ref with team/channel/user IDs,
+  source URL/deep link, timestamp, permalink lookup args, and source-level
+  dedupe key.
+- `payload.source_refs`: related message, thread, channel/DM, member, file, or
+  canvas refs when present in Slack payloads.
+- `payload.triage`: `harn.triage.source.v1` adapter data for Start My Day style
+  inbox events, including source refs, actor IDs, mention/direct-message/thread
+  hints, privacy flags, raw-payload provenance, and local/write action intents.
+- `payload.provider_raw`: Slack envelope, raw event, and canonical request
+  headers kept separate from normalized fields for audit and replay.
+
+Webhook and Socket Mode normalization remain CPU-only. Exact Slack message
+permalinks should be hydrated later with `call("chat.getPermalink", ...)` using
+the supplied `payload.source.permalink_request`; write-capable operations such
+as `chat.postMessage`, `chat.update`, and `chat.delete` are marked
+`requires_approval` in `outbound_methods()` and in triage action intents so
+upstream hosts can gate them.
 
 ## Operations
 

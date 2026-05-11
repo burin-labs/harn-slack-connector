@@ -1,14 +1,14 @@
 import {
   activate,
-  call,
   init,
   kinds,
-  normalize_inbound,
+  outbound_methods,
   payload_schema,
   provider_id,
   shutdown,
 } from "../src/lib"
 
+/** Build signed Slack request headers for fixture webhook bodies. */
 pub fn slack_headers(secret, body, ts) {
   let basestring = "v0:" + to_string(ts) + ":" + body
   return {
@@ -17,25 +17,33 @@ pub fn slack_headers(secret, body, ts) {
   }
 }
 
+/** Build a raw Events API request wrapper around a signed fixture body. */
 pub fn signed_raw(secret, body, ts, extra = nil) {
   let raw = {signing_secret: secret, body_text: body, headers: slack_headers(secret, body, ts), now: ts}
   return raw + extra ?? {}
 }
 
+/** Read a Slack webhook fixture body by basename. */
 pub fn fixture_body(name) {
   return read_file(source_dir() + "/fixtures/webhooks/" + name + ".json")
 }
 
+/** Build a signed raw Events API request for a named webhook fixture. */
 pub fn fixture_raw(name, secret, ts, extra = nil) {
   return signed_raw(secret, fixture_body(name), ts, extra)
 }
 
+/** Assert the public connector metadata and lifecycle exports stay usable. */
 pub fn assert_slack_interface() {
   shutdown()
   assert_eq(provider_id(), "slack", "provider id")
   assert_eq(kinds()[0], "webhook", "webhook kind")
   assert_eq(payload_schema().harn_schema_name, "SlackEventPayload", "payload schema name")
   assert_eq(payload_schema().json_schema.type, "object", "payload schema json object")
+  let methods = outbound_methods()
+  assert_eq(methods[0].method, "apps.connections.open", "method policies are exposed")
+  assert_eq(methods[2].method, "chat.postMessage", "write method is listed")
+  assert_eq(methods[2].requires_approval, true, "write method requires approval")
   let initialized = init({signing_secret: "test-secret", include_bot_messages: false})
   assert(initialized.initialized == true, "init stores state")
   let activated = activate([{id: "primary", path: "/slack/events", secrets: {signing_secret: "test-secret"}}])

@@ -4,14 +4,30 @@ let SLACK_API_BASE_URL = "https://slack.com/api"
 
 let SLACK_SIGNATURE_WINDOW_SECONDS = 300
 
-let SLACK_OUTBOUND_METHODS = [
-  "apps.connections.open",
-  "chat.postMessage",
-  "chat.update",
-  "chat.delete",
-  "conversations.history",
-  "conversations.replies",
-  "users.info",
+let SLACK_OUTBOUND_METHOD_POLICIES = [
+  {
+    method: "apps.connections.open",
+    mutates_provider: false,
+    requires_approval: false,
+    token_kind: "app",
+  },
+  {method: "chat.getPermalink", mutates_provider: false, requires_approval: false, token_kind: "bot"},
+  {method: "chat.postMessage", mutates_provider: true, requires_approval: true, token_kind: "bot"},
+  {method: "chat.update", mutates_provider: true, requires_approval: true, token_kind: "bot"},
+  {method: "chat.delete", mutates_provider: true, requires_approval: true, token_kind: "bot"},
+  {
+    method: "conversations.history",
+    mutates_provider: false,
+    requires_approval: false,
+    token_kind: "bot",
+  },
+  {
+    method: "conversations.replies",
+    mutates_provider: false,
+    requires_approval: false,
+    token_kind: "bot",
+  },
+  {method: "users.info", mutates_provider: false, requires_approval: false, token_kind: "bot"},
 ]
 
 var SLACK_STATE = {initialized: false, active: false, bindings: {}, ctx: {}}
@@ -26,13 +42,30 @@ pub fn kinds() {
   return ["webhook"]
 }
 
+/** Return outbound Slack Web API method policies for host-side approval gates. */
+pub fn outbound_methods() {
+  return SLACK_OUTBOUND_METHOD_POLICIES
+}
+
 /** Return the canonical normalized Slack event payload schema. */
 pub fn payload_schema() {
   return {
     harn_schema_name: "SlackEventPayload",
     json_schema: {
       type: "object",
-      required: ["type", "event", "event_type", "resource_id", "channel", "user", "raw"],
+      required: [
+        "type",
+        "event",
+        "event_type",
+        "resource_id",
+        "channel",
+        "user",
+        "source",
+        "source_refs",
+        "triage",
+        "provider_raw",
+        "raw",
+      ],
       additionalProperties: true,
       properties: {
         type: {type: "string", enum: ["event_callback"]},
@@ -58,6 +91,10 @@ pub fn payload_schema() {
         retry: {type: "object"},
         metrics: {type: "object"},
         occurred_at: {type: ["string", "integer", "number", "null"]},
+        source: {type: "object"},
+        source_refs: {type: "array"},
+        triage: {type: "object"},
+        provider_raw: {type: "object"},
         raw: {type: "object"},
       },
     },
@@ -263,7 +300,8 @@ pub fn socket_mode_ack(connection, envelope_id, payload = nil) {
 @complexity(allow)
 /** Dispatch a supported Slack Web API method with JSON body semantics. */
 pub fn call(method, args = {}) {
-  if !contains(SLACK_OUTBOUND_METHODS, method) {
+  let method_policy = __outbound_method_policy(method)
+  if method_policy == nil {
     return __err("method_not_found", "slack connector does not implement outbound method `" + method + "`")
   }
   var cfg = nil
@@ -314,13 +352,13 @@ pub fn call(method, args = {}) {
   }
   let payload = unwrap(decoded)
   if http_response.status < 200 || http_response.status >= 300 {
-    return __err(
-      "transport",
-      payload?.error ?? ("Slack API request failed with status " + to_string(http_response.status)),
-    )
+    if payload?.error != nil {
+      return __slack_api_error(method, payload, http_response.status)
+    }
+    return __err("transport", "Slack API request failed with status " + to_string(http_response.status))
   }
   if !(payload?.ok ?? false) {
-    return __err("slack_error", payload?.error ?? ("Slack API method `" + method + "` failed"))
+    return __slack_api_error(method, payload, http_response.status)
   }
   return payload
 }
@@ -334,8 +372,50 @@ fn __set_state(state) {
   return state
 }
 
-fn __err(code, message) {
-  return Err({code: code, message: message})
+fn __outbound_method_policy(method) {
+  for policy in SLACK_OUTBOUND_METHOD_POLICIES {
+    if policy.method == method {
+      return policy
+    }
+  }
+  return nil
+}
+
+fn __err(code, message, details = nil) {
+  var error = {code: code, message: message}
+  if details != nil {
+    error["details"] = details
+  }
+  return Err(error)
+}
+
+fn __slack_api_error(method, payload, status = nil) {
+  let slack_error = to_string(payload?.error ?? "slack_error")
+  let details = {
+    method: method,
+    status: status,
+    slack_error: slack_error,
+    needed: payload?.needed,
+    provided: payload?.provided,
+  }
+  if contains(
+    [
+      "not_authed",
+      "invalid_auth",
+      "token_revoked",
+      "account_inactive",
+      "missing_scope",
+      "no_permission",
+    ],
+    slack_error,
+  ) {
+    return __err(
+      slack_error,
+      "Slack API method `" + method + "` failed auth/scope check: " + slack_error,
+      details,
+    )
+  }
+  return __err("slack_error", slack_error, details)
 }
 
 fn __reject(error, status = 400) {
@@ -441,10 +521,9 @@ fn __signing_secret(raw) {
 }
 
 fn __include_bot_messages(raw) {
-  let configured = raw?.include_bot_messages ?? raw?.config?.include_bot_messages
+  return raw?.include_bot_messages ?? raw?.config?.include_bot_messages
     ?? __state()?.ctx?.include_bot_messages
     ?? false
-  return configured
 }
 
 fn __verify_slack_signature(raw, headers, body_text) {
@@ -503,12 +582,16 @@ fn __normalize_event_callback(payload, raw) {
     let channel = event?.channel ?? ""
     let ts = event?.ts ?? event?.event_ts ?? ""
     let resource_id = channel + "/" + ts
+    let dedupe_key = __dedupe_key(payload, event_type, resource_id)
     let normalized_payload = __payload_with_normalized_fields(
       payload,
       {
+        provider: SLACK_PROVIDER_ID,
         event_type: event_type,
         resource_id: resource_id,
         channel: channel,
+        channel_type: event?.channel_type,
+        message_ts: ts,
         thread_ts: event?.thread_ts ?? ts,
         user: {id: event?.user ?? "", name: event?.user_name ?? event?.username},
         text: event?.text ?? "",
@@ -517,10 +600,12 @@ fn __normalize_event_callback(payload, raw) {
         occurred_at: event?.event_ts ?? event?.ts ?? payload?.event_time,
         raw: event,
       },
+      raw,
+      dedupe_key,
     )
     return __event_result(
       event_type,
-      __dedupe_key(payload, event_type, resource_id),
+      dedupe_key,
       normalized_payload,
       __canonical_slack_headers(raw?.headers ?? {}),
     )
@@ -530,14 +615,20 @@ fn __normalize_event_callback(payload, raw) {
     let channel = item?.channel ?? event?.channel ?? ""
     let ts = item?.ts ?? event?.event_ts ?? ""
     let resource_id = channel + "/" + ts
+    let dedupe_key = __dedupe_key(payload, event_type, resource_id)
     let normalized_payload = __payload_with_normalized_fields(
       payload,
       {
+        provider: SLACK_PROVIDER_ID,
         event_type: event_type,
         resource_id: resource_id,
         channel: channel,
+        channel_type: event?.channel_type,
+        item_type: item?.type,
+        message_ts: item?.ts,
         thread_ts: item?.ts,
         user: {id: event?.user ?? "", name: event?.user_name ?? event?.username},
+        item_user: event?.item_user,
         text: event?.reaction ?? "",
         reaction: event?.reaction ?? "",
         retry: retry_info,
@@ -545,10 +636,12 @@ fn __normalize_event_callback(payload, raw) {
         occurred_at: event?.event_ts ?? payload?.event_time,
         raw: event,
       },
+      raw,
+      dedupe_key,
     )
     return __event_result(
       event_type,
-      __dedupe_key(payload, event_type, resource_id),
+      dedupe_key,
       normalized_payload,
       __canonical_slack_headers(raw?.headers ?? {}),
     )
@@ -561,12 +654,16 @@ fn __normalize_event_callback(payload, raw) {
       resource_base = channel
     }
     let resource_id = resource_base + "/" + to_string(ts)
+    let dedupe_key = __dedupe_key(payload, event_type, resource_id)
     let normalized_payload = __payload_with_normalized_fields(
       payload,
       {
+        provider: SLACK_PROVIDER_ID,
         event_type: event_type,
         resource_id: resource_id,
         channel: channel,
+        channel_type: event?.channel_type,
+        message_ts: nil,
         thread_ts: nil,
         user: {id: event?.user ?? "", name: event?.user_name ?? event?.username},
         text: "",
@@ -577,10 +674,12 @@ fn __normalize_event_callback(payload, raw) {
         occurred_at: event?.event_ts ?? payload?.event_time,
         raw: event,
       },
+      raw,
+      dedupe_key,
     )
     return __event_result(
       event_type,
-      __dedupe_key(payload, event_type, resource_id),
+      dedupe_key,
       normalized_payload,
       __canonical_slack_headers(raw?.headers ?? {}),
     )
@@ -590,12 +689,16 @@ fn __normalize_event_callback(payload, raw) {
     let channel = assistant_thread?.channel_id ?? assistant_thread?.context?.channel_id ?? event?.channel ?? ""
     let thread_ts = assistant_thread?.thread_ts ?? event?.event_ts
     let resource_id = channel + "/" + to_string(thread_ts ?? "")
+    let dedupe_key = __dedupe_key(payload, event_type, resource_id)
     let normalized_payload = __payload_with_normalized_fields(
       payload,
       {
+        provider: SLACK_PROVIDER_ID,
         event_type: event_type,
         resource_id: resource_id,
         channel: channel,
+        channel_type: event?.channel_type,
+        message_ts: thread_ts,
         thread_ts: thread_ts,
         user: {id: assistant_thread?.user_id ?? event?.user ?? "", name: event?.user_name ?? event?.username},
         text: "",
@@ -606,10 +709,12 @@ fn __normalize_event_callback(payload, raw) {
         occurred_at: event?.event_ts ?? payload?.event_time,
         raw: event,
       },
+      raw,
+      dedupe_key,
     )
     return __event_result(
       event_type,
-      __dedupe_key(payload, event_type, resource_id),
+      dedupe_key,
       normalized_payload,
       __canonical_slack_headers(raw?.headers ?? {}),
     )
@@ -636,9 +741,449 @@ fn __dedupe_key(payload, event_type, resource_id) {
   return "slack:" + to_string(team) + ":" + event_type + ":" + resource_id
 }
 
-fn __payload_with_normalized_fields(payload, normalized) {
+fn __payload_with_normalized_fields(payload, normalized, raw = nil, dedupe_key = nil) {
   let base = payload ?? {}
+  let provider_raw = {envelope: payload, event: normalized?.raw, headers: __canonical_slack_headers(raw?.headers ?? {})}
+  let source = __slack_source(normalized, payload, dedupe_key)
+  let source_refs = __slack_source_refs(normalized, source)
+  let triage = __slack_triage_source(normalized, source, source_refs, dedupe_key)
   return base + normalized
+    + {source: source, source_refs: source_refs, triage: triage, provider_raw: provider_raw}
+}
+
+fn __slack_source(normalized, envelope, delivery_dedupe_key) {
+  let event = normalized?.raw ?? {}
+  let team_id = envelope?.team_id ?? event?.team ?? event?.team_id ?? event?.assistant_thread?.context?.team_id
+  let enterprise_id = envelope?.enterprise_id ?? event?.enterprise_id
+    ?? event?.assistant_thread?.context?.enterprise_id
+  let channel = normalized?.channel ?? ""
+  let message_ts = normalized?.message_ts
+  let thread_ts = normalized?.thread_ts
+  let source_kind = __slack_source_kind(normalized)
+  let channel_url = __slack_channel_url(team_id, channel)
+  let channel_deep_link = __slack_channel_deep_link(team_id, channel)
+  var deep_link = channel_deep_link
+  if source_kind == "app_home" && envelope?.api_app_id != nil {
+    deep_link = __slack_app_home_deep_link(team_id, envelope.api_app_id, normalized?.tab)
+  }
+  let permalink = event?.permalink ?? event?.url ?? event?.message?.permalink
+  let source_url = permalink ?? channel_url
+  return {
+    provider: SLACK_PROVIDER_ID,
+    kind: source_kind,
+    id: __slack_source_key(source_kind, team_id, channel, message_ts, normalized),
+    dedupe_key: __slack_source_dedupe_key(source_kind, team_id, channel, message_ts, normalized),
+    delivery_dedupe_key: delivery_dedupe_key,
+    team_id: team_id,
+    enterprise_id: enterprise_id,
+    app_id: envelope?.api_app_id,
+    channel_id: channel,
+    channel_type: normalized?.channel_type,
+    message_ts: message_ts,
+    thread_ts: thread_ts,
+    thread_root_ts: if thread_ts != nil && message_ts != nil && thread_ts != message_ts {
+      thread_ts
+    } else {
+      nil
+    },
+    user_id: normalized?.user?.id,
+    item_user_id: normalized?.item_user,
+    event_id: envelope?.event_id,
+    event_time: envelope?.event_time,
+    timestamp: normalized?.occurred_at,
+    url: source_url,
+    deep_link: deep_link,
+    permalink: permalink,
+    permalink_request: __slack_permalink_request(channel, message_ts),
+    raw_ref: {event_id: envelope?.event_id, event_time: envelope?.event_time},
+  }
+}
+
+fn __slack_source_kind(normalized) {
+  let event_type = normalized?.event_type ?? ""
+  let thread_ts = normalized?.thread_ts
+  let message_ts = normalized?.message_ts
+  if event_type == "message" {
+    if normalized?.channel_type == "im" {
+      return "direct_message"
+    }
+    if thread_ts != nil && message_ts != nil && thread_ts != message_ts {
+      return "thread_message"
+    }
+    return "message"
+  }
+  if event_type == "app_mention" {
+    if thread_ts != nil && message_ts != nil && thread_ts != message_ts {
+      return "thread_mention"
+    }
+    return "mention"
+  }
+  if event_type == "reaction_added" {
+    if normalized?.item_type == "file" {
+      return "file_reaction"
+    }
+    return "reaction"
+  }
+  if event_type == "app_home_opened" {
+    return "app_home"
+  }
+  if event_type == "assistant_thread_started" {
+    return "assistant_thread"
+  }
+  return event_type
+}
+
+fn __slack_source_refs(normalized, source) {
+  var refs = [source]
+  let team_id = source?.team_id
+  let channel = source?.channel_id
+  if channel != nil && channel != "" {
+    let conversation_kind = if normalized?.channel_type == "im" || starts_with(to_string(channel), "D") {
+      "direct_message"
+    } else {
+      "channel"
+    }
+    refs = refs
+      .push(
+      {
+        provider: SLACK_PROVIDER_ID,
+        kind: conversation_kind,
+        id: __slack_ref_id(conversation_kind, team_id, channel),
+        team_id: team_id,
+        channel_id: channel,
+        url: __slack_channel_url(team_id, channel),
+        deep_link: __slack_channel_deep_link(team_id, channel),
+      },
+    )
+  }
+  if source?.thread_root_ts != nil {
+    refs = refs
+      .push(
+      {
+        provider: SLACK_PROVIDER_ID,
+        kind: "thread",
+        id: __slack_ref_id("thread", team_id, channel + ":" + to_string(source.thread_root_ts)),
+        team_id: team_id,
+        channel_id: channel,
+        thread_ts: source.thread_root_ts,
+        url: __slack_channel_url(team_id, channel),
+        deep_link: __slack_channel_deep_link(team_id, channel),
+        permalink_request: __slack_permalink_request(channel, source.thread_root_ts),
+      },
+    )
+  }
+  let user_id = normalized?.user?.id
+  if user_id != nil && user_id != "" {
+    refs = refs.push(__slack_member_ref(team_id, user_id, "actor"))
+  }
+  if normalized?.item_user != nil && normalized.item_user != "" && normalized.item_user != user_id {
+    refs = refs.push(__slack_member_ref(team_id, normalized.item_user, "item_user"))
+  }
+  let item = normalized?.raw?.item ?? {}
+  if item?.file != nil && item.file != "" {
+    refs = refs
+      .push(
+      {
+        provider: SLACK_PROVIDER_ID,
+        kind: "file",
+        id: __slack_ref_id("file", team_id, item.file),
+        team_id: team_id,
+        file_id: item.file,
+        deep_link: __slack_file_deep_link(team_id, item.file),
+      },
+    )
+  }
+  let canvas_id = normalized?.raw?.canvas_id ?? normalized?.raw?.canvas?.id
+  if canvas_id != nil && canvas_id != "" {
+    refs = refs
+      .push(
+      {
+        provider: SLACK_PROVIDER_ID,
+        kind: "canvas",
+        id: __slack_ref_id("canvas", team_id, canvas_id),
+        team_id: team_id,
+        canvas_id: canvas_id,
+        url: normalized?.raw?.canvas?.url ?? normalized?.raw?.canvas_url,
+      },
+    )
+  }
+  return refs
+}
+
+fn __slack_triage_source(normalized, source, source_refs, delivery_dedupe_key) {
+  let text = normalized?.text ?? ""
+  let mentions = __slack_mentions(text)
+  return {
+    schema: "harn.triage.source.v1",
+    provider: SLACK_PROVIDER_ID,
+    source_kind: source?.kind,
+    source_ref: source,
+    source_refs: source_refs,
+    source_url: source?.url,
+    source_deep_link: source?.deep_link,
+    source_timestamp: source?.timestamp,
+    dedupe_key: source?.dedupe_key,
+    delivery_dedupe_key: delivery_dedupe_key,
+    actor_ids: __slack_actor_ids(normalized),
+    actors: __slack_actors(normalized, source?.team_id),
+    mentions: mentions,
+    content_text: text,
+    summary: __slack_triage_summary(normalized),
+    priority_hints: {
+      direct_message: source?.kind == "direct_message",
+      mention: source?.kind == "mention" || source?.kind == "thread_mention",
+      thread_reply: source?.kind == "thread_message" || source?.kind == "thread_mention",
+      reaction: source?.kind == "reaction" || source?.kind == "file_reaction",
+      user_mentions: mentions,
+      unread: normalized?.raw?.unread ?? normalized?.raw?.is_unread,
+      recent: true,
+    },
+    privacy: __slack_privacy(normalized),
+    provider_raw_field: "provider_raw",
+    action_intents: __slack_action_intents(normalized, source),
+  }
+}
+
+fn __slack_actor_ids(normalized) {
+  var actors = []
+  let user_id = normalized?.user?.id
+  if user_id != nil && user_id != "" {
+    actors = actors.push(user_id)
+  }
+  let item_user = normalized?.item_user
+  if item_user != nil && item_user != "" && item_user != user_id {
+    actors = actors.push(item_user)
+  }
+  return actors
+}
+
+fn __slack_actors(normalized, team_id) {
+  var actors = []
+  let user = normalized?.user ?? {}
+  if user?.id != nil && user.id != "" {
+    actors = actors
+      .push(
+      {
+        provider: SLACK_PROVIDER_ID,
+        id: user.id,
+        name: user?.name,
+        role: if normalized?.event_type == "reaction_added" {
+          "reactor"
+        } else {
+          "sender"
+        },
+        ref: __slack_member_ref(team_id, user.id, "actor"),
+      },
+    )
+  }
+  let item_user = normalized?.item_user
+  if item_user != nil && item_user != "" && item_user != user?.id {
+    actors = actors
+      .push(
+      {
+        provider: SLACK_PROVIDER_ID,
+        id: item_user,
+        name: nil,
+        role: "item_user",
+        ref: __slack_member_ref(team_id, item_user, "item_user"),
+      },
+    )
+  }
+  return actors
+}
+
+fn __slack_privacy(normalized) {
+  var flags = []
+  if trim(to_string(normalized?.text ?? "")) != "" {
+    flags = flags.push("contains_message_text")
+  }
+  if normalized?.channel_type == "im" || starts_with(to_string(normalized?.channel ?? ""), "D") {
+    flags = flags.push("direct_message")
+  }
+  if normalized?.raw?.item?.file != nil || normalized?.raw?.file != nil {
+    flags = flags.push("contains_file_ref")
+  }
+  return {
+    classification: if contains(flags, "direct_message") {
+      "private"
+    } else {
+      "workspace"
+    },
+    flags: flags,
+    raw_payload_present: true,
+    may_contain_user_content: contains(flags, "contains_message_text") || contains(flags, "contains_file_ref"),
+  }
+}
+
+fn __slack_action_intents(normalized, source) {
+  var intents = [
+    {kind: "dismiss", scope: "harn", mutates_provider: false, requires_approval: false},
+    {kind: "snooze", scope: "harn", mutates_provider: false, requires_approval: false},
+    {
+      kind: "convert_to_task",
+      scope: "harn",
+      mutates_provider: false,
+      requires_approval: false,
+      source_dedupe_key: source?.dedupe_key,
+    },
+  ]
+  let channel = normalized?.channel
+  let thread_ts = normalized?.thread_ts ?? normalized?.message_ts
+  if channel != nil && channel != "" && thread_ts != nil && thread_ts != "" {
+    intents = intents
+      .push(
+      {
+        kind: "draft_reply",
+        scope: "slack",
+        provider_method: "chat.postMessage",
+        mutates_provider: true,
+        requires_approval: true,
+        args_template: {channel: channel, thread_ts: thread_ts, text: nil},
+      },
+    )
+  }
+  return intents
+}
+
+fn __slack_triage_summary(normalized) {
+  if normalized?.event_type == "reaction_added" {
+    return "Reaction `" + to_string(normalized?.reaction ?? "") + "` on Slack "
+      + to_string(normalized?.item_type ?? "item")
+  }
+  let text = trim(to_string(normalized?.text ?? ""))
+  if text != "" {
+    return text
+  }
+  if normalized?.event_type == "app_home_opened" {
+    return "Slack App Home opened"
+  }
+  if normalized?.event_type == "assistant_thread_started" {
+    return "Slack assistant thread started"
+  }
+  return to_string(normalized?.event_type ?? "Slack event")
+}
+
+fn __slack_mentions(text) {
+  let matches = regex_match("<@[A-Za-z0-9._-]+>", to_string(text ?? ""))
+  if matches == nil {
+    return []
+  }
+  var users = []
+  for token in matches {
+    users = users.push(to_string(token).replace("<@", "").replace(">", ""))
+  }
+  return users
+}
+
+fn __slack_source_key(source_kind, team_id, channel, message_ts, normalized) {
+  if channel != nil && channel != "" && message_ts != nil && message_ts != "" {
+    return __slack_ref_id(source_kind, team_id, channel + ":" + to_string(message_ts))
+  }
+  if normalized?.user?.id != nil && normalized.user.id != "" {
+    return __slack_ref_id(source_kind, team_id, normalized.user.id)
+  }
+  return __slack_ref_id(source_kind, team_id, normalized?.resource_id ?? normalized?.event_type ?? "unknown")
+}
+
+fn __slack_source_dedupe_key(source_kind, team_id, channel, message_ts, normalized) {
+  let team = __slack_team_part(team_id)
+  if source_kind == "reaction" || source_kind == "file_reaction" {
+    return "slack:reaction:" + team + ":" + to_string(channel ?? "") + ":" + to_string(message_ts ?? "")
+      + ":"
+      + to_string(normalized?.reaction ?? "")
+      + ":"
+      + to_string(normalized?.user?.id ?? "")
+  }
+  if channel != nil && channel != "" && message_ts != nil && message_ts != "" {
+    return "slack:message:" + team + ":" + to_string(channel) + ":" + to_string(message_ts)
+  }
+  return "slack:" + to_string(source_kind) + ":" + team + ":"
+    + to_string(normalized?.resource_id ?? "unknown")
+}
+
+fn __slack_ref_id(kind, team_id, id) {
+  return "slack:" + to_string(kind) + ":" + __slack_team_part(team_id) + ":" + to_string(id ?? "unknown")
+}
+
+fn __slack_team_part(team_id) {
+  if team_id == nil || trim(to_string(team_id)) == "" {
+    return "unknown-team"
+  }
+  return to_string(team_id)
+}
+
+fn __slack_member_ref(team_id, user_id, role) {
+  return {
+    provider: SLACK_PROVIDER_ID,
+    kind: "member",
+    role: role,
+    id: __slack_ref_id("member", team_id, user_id),
+    team_id: team_id,
+    user_id: user_id,
+    deep_link: __slack_member_deep_link(team_id, user_id),
+  }
+}
+
+fn __slack_channel_url(team_id, channel) {
+  if channel == nil || trim(to_string(channel)) == "" {
+    return nil
+  }
+  var query = [{key: "channel", value: to_string(channel)}]
+  if team_id != nil && trim(to_string(team_id)) != "" {
+    query = query.push({key: "team", value: to_string(team_id)})
+  }
+  return "https://slack.com/app_redirect?" + query_stringify(query)
+}
+
+fn __slack_channel_deep_link(team_id, channel) {
+  if channel == nil || trim(to_string(channel)) == "" || team_id == nil
+    || trim(to_string(team_id)) == "" {
+    return nil
+  }
+  return "slack://channel?"
+    + query_stringify([{key: "team", value: to_string(team_id)}, {key: "id", value: to_string(channel)}])
+}
+
+fn __slack_member_deep_link(team_id, user_id) {
+  if user_id == nil || trim(to_string(user_id)) == "" || team_id == nil
+    || trim(to_string(team_id)) == "" {
+    return nil
+  }
+  return "slack://user?"
+    + query_stringify([{key: "team", value: to_string(team_id)}, {key: "id", value: to_string(user_id)}])
+}
+
+fn __slack_file_deep_link(team_id, file_id) {
+  if file_id == nil || trim(to_string(file_id)) == "" || team_id == nil
+    || trim(to_string(team_id)) == "" {
+    return nil
+  }
+  return "slack://file?"
+    + query_stringify([{key: "team", value: to_string(team_id)}, {key: "id", value: to_string(file_id)}])
+}
+
+fn __slack_app_home_deep_link(team_id, app_id, tab = nil) {
+  if app_id == nil || trim(to_string(app_id)) == "" || team_id == nil || trim(to_string(team_id)) == "" {
+    return nil
+  }
+  var query = [{key: "team", value: to_string(team_id)}, {key: "id", value: to_string(app_id)}]
+  if tab != nil && trim(to_string(tab)) != "" {
+    query = query.push({key: "tab", value: to_string(tab)})
+  }
+  return "slack://app?" + query_stringify(query)
+}
+
+fn __slack_permalink_request(channel, message_ts) {
+  if channel == nil || trim(to_string(channel)) == "" || message_ts == nil
+    || trim(to_string(message_ts)) == "" {
+    return nil
+  }
+  return {
+    method: "chat.getPermalink",
+    args: {channel: channel, message_ts: message_ts},
+    mutates_provider: false,
+    requires_approval: false,
+  }
 }
 
 fn __outbound_config(args) {
