@@ -6,8 +6,8 @@ API signatures, handles URL verification, normalizes Slack events to the Harn
 dispatches outbound Web API calls. Normalized events include a source-rich
 triage adapter payload for Harn and Burin Home inbox workflows.
 
-This package implements Harn Connector Contract v1. Use Harn CLI `0.8.9` or
-newer; this repository pins the tested CLI in `.harn-version`. The canonical
+This package implements Harn Connector Contract v1. Use the Harn CLI version
+pinned in `.harn-version` when developing or cutting releases. The canonical
 connector contract reference is the Harn trigger quick reference:
 https://harnlang.com/docs/llm/harn-triggers-quickref.html
 
@@ -88,9 +88,17 @@ Create a Slack app with Events API enabled for HTTPS webhooks, or Socket Mode
 enabled for WebSocket delivery. Store secrets in the Harn secret provider or
 pass them through environment variables during local development:
 
+- `slack/signing-secret`: Events API signing secret.
+- `slack/bot-token`: bot token for Web API methods.
+- `slack/app-token`: app-level token with `connections:write` for Socket Mode.
 - `SLACK_SIGNING_SECRET`: Events API signing secret.
 - `SLACK_BOT_TOKEN`: bot token for Web API methods.
 - `SLACK_APP_TOKEN`: app-level token with `connections:write` for Socket Mode.
+
+`harn connect slack` stores connector credentials under the Slack secret IDs
+listed above. Runtime configuration can also pass `signing_secret_id`,
+`webhook_secret_id`, `bot_token_secret`, or `app_token_secret`; direct values
+remain supported for local tests and one-off scripts.
 
 Required bot scopes depend on outbound calls and subscribed events:
 
@@ -188,9 +196,10 @@ too low over time. Keep the verify-and-ack path fast, alert on signature rejects
 and retry spikes, and keep handler/network work outside `normalize_inbound`.
 When Harn Cloud managed ingress is used, configure the connector package through
 `HARN_CLOUD_CONNECTORS_CONFIG` and store the webhook secret as
-`slack.webhook.secret`.
+`slack/signing-secret`, or set a binding-level `signing_secret_id`/
+`webhook_secret_id`.
 
-Release checklist for `v0.1.0`:
+Local verification:
 
 - `harn check src`
 - `harn lint src`
