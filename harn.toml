@@ -11,10 +11,12 @@ default = "src/lib.harn"
 [[providers]]
 id = "slack"
 connector = { harn = "src/lib.harn" }
+capabilities = ["webhook", "oauth", "streaming"]
+oauth = { resource = "https://slack.com/api/", authorization_endpoint = "https://slack.com/oauth/v2/authorize", token_endpoint = "https://slack.com/api/oauth.v2.access", scopes = "app_mentions:read chat:write", token_endpoint_auth_method = "client_secret_post" }
 
 [providers.setup]
 auth_type = "oauth2"
-flow = "slack-app"
+flow = "browser"
 required_scopes = ["app_mentions:read", "chat:write"]
 required_secrets = ["slack/signing-secret", "slack/bot-token", "slack/app-token"]
 setup_command = ["harn", "connect", "slack"]

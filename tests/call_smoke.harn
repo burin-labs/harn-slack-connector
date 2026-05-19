@@ -14,7 +14,16 @@ pipeline default() {
   assert_eq(posted.channel, "C111", "postMessage response channel")
   call(
     "chat.getPermalink",
-    {api_base_url: base, bot_token: token, channel: "C111", message_ts: "1713650000.000100"},
+    {
+      api_base_url: base,
+      bot_token: token,
+      bot_token_secret: "slack/bot-token",
+      signing_secret: "webhook-secret-must-not-leak",
+      signing_secret_id: "custom-signing-secret-id",
+      config: {webhook_secret: "nested-webhook-secret-must-not-leak"},
+      channel: "C111",
+      message_ts: "1713650000.000100",
+    },
   )
   call(
     "chat.update",
@@ -24,16 +33,27 @@ pipeline default() {
   call("conversations.history", {api_base_url: base, bot_token: token, channel: "C111", limit: 2})
   call("conversations.replies", {api_base_url: base, bot_token: token, channel: "C111", ts: "1.1"})
   call("users.info", {api_base_url: base, bot_token: token, user_id: "U111"})
+  call(
+    "apps.connections.open",
+    {api_base_url: base, app_token: "xapp-test-token", app_token_secret: "slack/app-token"},
+  )
   let calls = http_mock_calls()
-  assert_eq(len(calls), 7, "all required outbound methods dispatched")
+  assert_eq(len(calls), 8, "all required outbound methods dispatched")
   assert_eq(calls[0].method, "POST", "post uses POST")
   assert_eq(calls[0].url, base + "/chat.postMessage", "post URL")
   assert_eq(calls[0].headers.authorization, "[redacted]", "authorization header is redacted")
   assert_eq(json_parse(calls[0].body).text, "hello", "post body text")
   assert_eq(calls[1].url, base + "/chat.getPermalink", "permalink URL")
   assert_eq(json_parse(calls[1].body).message_ts, "1713650000.000100", "permalink message ts")
+  assert(json_parse(calls[1].body).bot_token_secret == nil, "bot token secret id is not sent")
+  assert(json_parse(calls[1].body).signing_secret == nil, "webhook signing secret is not sent")
+  assert(json_parse(calls[1].body).signing_secret_id == nil, "webhook signing secret id is not sent")
+  assert(json_parse(calls[1].body).config == nil, "connector config is not sent")
   assert_eq(calls[6].url, base + "/users.info", "users.info URL")
   assert_eq(json_parse(calls[6].body).user, "U111", "users.info user_id normalized")
+  assert(json_parse(calls[6].body).user_id == nil, "users.info strips user_id alias")
+  assert_eq(calls[7].url, base + "/apps.connections.open", "apps.connections.open URL")
+  assert(json_parse(calls[7].body).app_token_secret == nil, "app token secret id is not sent")
   http_mock_clear()
   http_mock(
     "POST",
