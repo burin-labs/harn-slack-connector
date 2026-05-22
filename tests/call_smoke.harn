@@ -1,6 +1,6 @@
 import { call } from "../src/lib"
 
-pipeline default() {
+pipeline test_call_smoke(task) {
   http_mock_clear()
   let base = "https://slack.test/api"
   let token = "xoxb-test-token"
@@ -33,27 +33,54 @@ pipeline default() {
   call("conversations.history", {api_base_url: base, bot_token: token, channel: "C111", limit: 2})
   call("conversations.replies", {api_base_url: base, bot_token: token, channel: "C111", ts: "1.1"})
   call("users.info", {api_base_url: base, bot_token: token, user_id: "U111"})
+  call("users.lookupByEmail", {api_base_url: base, bot_token: token, email: "person@example.test"})
+  call(
+    "reactions.add",
+    {api_base_url: base, bot_token: token, channel: "C111", timestamp: "1.1", name: "eyes"},
+  )
+  call(
+    "reactions.remove",
+    {api_base_url: base, bot_token: token, channel: "C111", timestamp: "1.1", name: "eyes"},
+  )
+  call(
+    "views.open",
+    {api_base_url: base, bot_token: token, trigger_id: "trigger-1", view: {type: "modal"}},
+  )
+  call("views.update", {api_base_url: base, bot_token: token, view_id: "V111", view: {type: "modal"}})
   call(
     "apps.connections.open",
     {api_base_url: base, app_token: "xapp-test-token", app_token_secret: "slack/app-token"},
   )
   let calls = http_mock_calls()
-  assert_eq(len(calls), 8, "all required outbound methods dispatched")
+  assert_eq(len(calls), 13, "all required outbound methods dispatched")
+  let post_body = json_parse(calls[0].body)
+  let permalink_body = json_parse(calls[1].body)
+  let user_info_body = json_parse(calls[6].body)
+  let lookup_body = json_parse(calls[7].body)
+  let reaction_body = json_parse(calls[8].body)
+  let modal_body = json_parse(calls[11].body)
+  let socket_body = json_parse(calls[12].body)
   assert_eq(calls[0].method, "POST", "post uses POST")
   assert_eq(calls[0].url, base + "/chat.postMessage", "post URL")
   assert_eq(calls[0].headers.authorization, "[redacted]", "authorization header is redacted")
-  assert_eq(json_parse(calls[0].body).text, "hello", "post body text")
+  assert_eq(post_body.text, "hello", "post body text")
   assert_eq(calls[1].url, base + "/chat.getPermalink", "permalink URL")
-  assert_eq(json_parse(calls[1].body).message_ts, "1713650000.000100", "permalink message ts")
-  assert(json_parse(calls[1].body).bot_token_secret == nil, "bot token secret id is not sent")
-  assert(json_parse(calls[1].body).signing_secret == nil, "webhook signing secret is not sent")
-  assert(json_parse(calls[1].body).signing_secret_id == nil, "webhook signing secret id is not sent")
-  assert(json_parse(calls[1].body).config == nil, "connector config is not sent")
+  assert_eq(permalink_body.message_ts, "1713650000.000100", "permalink message ts")
+  assert(permalink_body.bot_token_secret == nil, "bot token secret id is not sent")
+  assert(permalink_body.signing_secret == nil, "webhook signing secret is not sent")
+  assert(permalink_body.signing_secret_id == nil, "webhook signing secret id is not sent")
+  assert(permalink_body.config == nil, "connector config is not sent")
   assert_eq(calls[6].url, base + "/users.info", "users.info URL")
-  assert_eq(json_parse(calls[6].body).user, "U111", "users.info user_id normalized")
-  assert(json_parse(calls[6].body).user_id == nil, "users.info strips user_id alias")
-  assert_eq(calls[7].url, base + "/apps.connections.open", "apps.connections.open URL")
-  assert(json_parse(calls[7].body).app_token_secret == nil, "app token secret id is not sent")
+  assert_eq(user_info_body.user, "U111", "users.info user_id normalized")
+  assert(user_info_body.user_id == nil, "users.info strips user_id alias")
+  assert_eq(calls[7].url, base + "/users.lookupByEmail", "users.lookupByEmail URL")
+  assert_eq(lookup_body.email, "person@example.test", "users.lookupByEmail body")
+  assert_eq(calls[8].url, base + "/reactions.add", "reactions.add URL")
+  assert_eq(reaction_body.name, "eyes", "reaction name")
+  assert_eq(calls[11].url, base + "/views.update", "views.update URL")
+  assert_eq(modal_body.view.type, "modal", "modal view body")
+  assert_eq(calls[12].url, base + "/apps.connections.open", "apps.connections.open URL")
+  assert(socket_body.app_token_secret == nil, "app token secret id is not sent")
   http_mock_clear()
   http_mock(
     "POST",
@@ -82,7 +109,7 @@ pipeline default() {
     "missing scope needed detail",
   )
   http_mock_clear()
-  let unsupported = call("reactions.add", {api_base_url: base, bot_token: token})
+  let unsupported = call("pins.add", {api_base_url: base, bot_token: token})
   assert(is_err(unsupported), "unsupported method rejected")
   assert_eq(unwrap_err(unsupported).code, "method_not_found", "unsupported method code")
   let app_token_for_bot_method = call(

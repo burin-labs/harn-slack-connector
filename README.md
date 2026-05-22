@@ -43,6 +43,7 @@ trigger respond on slack {
   on event {
     if event.event_type == "app_mention" {
       call("chat.postMessage", {
+        bot_token: env("SLACK_BOT_TOKEN"),
         channel: event.channel,
         thread_ts: event.thread_ts,
         text: "Hello from Harn!",
@@ -69,6 +70,7 @@ pipeline socket_mode_worker() {
     let next = socket_mode_receive(conn, {timeout_ms: 30000})
     if next.type == "event" && next.event.kind == "app_mention" {
       call("chat.postMessage", {
+        bot_token: env("SLACK_BOT_TOKEN"),
         channel: next.event.payload.channel,
         thread_ts: next.event.payload.thread_ts,
         text: "Hello from Socket Mode!",
@@ -85,8 +87,9 @@ can pass `socket_url` and use Harn `websocket_mock(...)`; production can omit
 ## Slack App Setup
 
 Create a Slack app with Events API enabled for HTTPS webhooks, or Socket Mode
-enabled for WebSocket delivery. Store secrets in the Harn secret provider or
-pass them through environment variables during local development:
+enabled for WebSocket delivery. Store secrets in the Harn secret provider, pass
+secret IDs, or pass direct values read from environment variables in local
+scripts:
 
 - `slack/signing-secret`: Events API signing secret.
 - `slack/bot-token`: bot token for Web API methods.
@@ -107,11 +110,14 @@ Required bot scopes depend on outbound calls and subscribed events:
   message events in those surfaces.
 - `reactions:read` for `reaction_added`.
 - `chat:write` for `chat.postMessage`, `chat.update`, and `chat.delete`.
+- `reactions:write` for `reactions.add` and `reactions.remove`.
+- `views.open` and `views.update` use the app's interactivity `trigger_id` or
+  view identifiers rather than an additional method-specific OAuth scope.
 - `chat.getPermalink` uses the event `channel` and `ts` to hydrate exact message
   permalinks outside the webhook hot path.
 - `channels:history`/`groups:history`/`im:history`/`mpim:history` as applicable
   for `conversations.history` and `conversations.replies`.
-- `users:read` for `users.info`.
+- `users:read` for `users.info`; `users:read.email` for `users.lookupByEmail`.
 
 Minimal Slack app manifest:
 
@@ -179,15 +185,15 @@ Each normalized event also carries:
 - `payload.triage`: `harn.triage.source.v1` adapter data for Start My Day style
   inbox events, including source refs, actor IDs, mention/direct-message/thread
   hints, privacy flags, raw-payload provenance, and local/write action intents.
-- `payload.provider_raw`: Slack envelope, raw event, and canonical request
-  headers kept separate from normalized fields for audit and replay.
+- `payload.provider_raw`: Slack envelope, raw event, and safe canonical request
+  headers kept separate from normalized fields for audit; Slack signatures are
+  redacted before normalized events leave the connector.
 
 Webhook and Socket Mode normalization remain CPU-only. Exact Slack message
 permalinks should be hydrated later with `call("chat.getPermalink", ...)` using
-the supplied `payload.source.permalink_request`; write-capable operations such
-as `chat.postMessage`, `chat.update`, and `chat.delete` are marked
-`requires_approval` in `outbound_methods()` and in triage action intents so
-upstream hosts can gate them.
+the supplied `payload.source.permalink_request`; write-capable outbound methods
+are marked `requires_approval` in `outbound_methods()` and in triage action
+intents so upstream hosts can gate them.
 
 ## Operations
 
@@ -201,12 +207,7 @@ When Harn Cloud managed ingress is used, configure the connector package through
 
 Local verification:
 
-- `harn check src`
-- `harn lint src`
-- `harn fmt --check src tests`
-- `for test in tests/*.harn; do harn run "$test"; done`
-- `harn connector check .`
-- package install/import smoke from a clean temp consumer project
+- `harn connector test . --provider slack`
 - Harn Cloud local managed-ingress load smoke using the package checkout
 
 ## Development
@@ -221,13 +222,7 @@ harn --version
 Run the local CI equivalent:
 
 ```sh
-harn check src
-harn lint src
-harn fmt --check src tests
-for test in tests/*.harn; do
-  harn run "$test" || exit 1
-done
-harn connector check .
+harn connector test . --provider slack
 ```
 
 ## License

@@ -4,6 +4,8 @@ let SLACK_API_BASE_URL = "https://slack.com/api"
 
 let SLACK_SIGNATURE_WINDOW_SECONDS = 300
 
+let SLACK_REDACTED_HEADER_VALUE = "[redacted]"
+
 let SLACK_OUTBOUND_METHOD_POLICIES = [
   {
     method: "apps.connections.open",
@@ -28,6 +30,16 @@ let SLACK_OUTBOUND_METHOD_POLICIES = [
     token_kind: "bot",
   },
   {method: "users.info", mutates_provider: false, requires_approval: false, token_kind: "bot"},
+  {
+    method: "users.lookupByEmail",
+    mutates_provider: false,
+    requires_approval: false,
+    token_kind: "bot",
+  },
+  {method: "reactions.add", mutates_provider: true, requires_approval: true, token_kind: "bot"},
+  {method: "reactions.remove", mutates_provider: true, requires_approval: true, token_kind: "bot"},
+  {method: "views.open", mutates_provider: true, requires_approval: true, token_kind: "bot"},
+  {method: "views.update", mutates_provider: true, requires_approval: true, token_kind: "bot"},
 ]
 
 var SLACK_STATE = {initialized: false, active: false, bindings: {}, ctx: {}}
@@ -463,7 +475,7 @@ fn __header(headers, name) {
 }
 
 fn __canonical_slack_headers(headers) {
-  var canonical = headers ?? {}
+  var canonical = {}
   for pair in [
     {raw: "content-type", canonical: "Content-Type"},
     {raw: "x-slack-signature", canonical: "X-Slack-Signature"},
@@ -473,7 +485,11 @@ fn __canonical_slack_headers(headers) {
   ] {
     let value = __header(headers, pair.raw)
     if value != nil && value != "" {
-      canonical[pair.canonical] = value
+      canonical[pair.canonical] = if pair.raw == "x-slack-signature" {
+        SLACK_REDACTED_HEADER_VALUE
+      } else {
+        value
+      }
     }
   }
   return canonical
@@ -719,13 +735,11 @@ fn __verify_slack_signature(raw, headers, body_text) {
     return __err("invalid_timestamp", "x-slack-request-timestamp is not an integer")
   }
   let ts = unwrap(parsed_ts)
-  let now = raw?.now ?? raw?.metadata?.now ?? raw?.received_at ?? raw?.metadata?.received_at
-  if now == nil {
-    return __err(
-      "missing_now",
-      "slack signature verification requires current time in raw.now or raw.metadata.now",
-    )
+  let resolved_now = __request_timestamp_seconds(raw)
+  if is_err(resolved_now) {
+    return resolved_now
   }
+  let now = unwrap(resolved_now)
   if abs(now - ts) > SLACK_SIGNATURE_WINDOW_SECONDS {
     return __err(
       "expired_timestamp",
@@ -742,6 +756,37 @@ fn __verify_slack_signature(raw, headers, body_text) {
     return __err("invalid_signature", "x-slack-signature did not match the request body")
   }
   return Ok(true)
+}
+
+fn __request_timestamp_seconds(raw) {
+  let candidate = raw?.now ?? raw?.metadata?.now ?? raw?.received_at ?? raw?.metadata?.received_at
+  if candidate == nil {
+    return __err(
+      "missing_now",
+      "slack signature verification requires current time in raw.now, raw.metadata.now, or raw.received_at",
+    )
+  }
+  let kind = type_of(candidate)
+  if kind == "int" || kind == "float" {
+    return Ok(candidate)
+  }
+  let text = trim(to_string(candidate))
+  if text == "" {
+    return __err("missing_now", "slack signature verification current time was blank")
+  }
+  let numeric = try {
+    to_float(text)
+  }
+  if !is_err(numeric) && unwrap(numeric) != nil {
+    return Ok(unwrap(numeric))
+  }
+  let parsed = try {
+    date_parse(text)
+  }
+  if is_err(parsed) || unwrap(parsed) == nil {
+    return __err("invalid_now", "slack signature verification current time was not a timestamp")
+  }
+  return Ok(unwrap(parsed))
 }
 
 @complexity(allow)
@@ -1370,11 +1415,10 @@ fn __slack_permalink_request(channel, message_ts) {
 }
 
 fn __outbound_config(args) {
-  let api_base_url = args?.api_base_url ?? env_or("SLACK_API_BASE_URL", SLACK_API_BASE_URL)
+  let api_base_url = args?.api_base_url ?? SLACK_API_BASE_URL
   let bot_token = __first_secret_value([args?.bot_token, args?.token, args?.secrets?.bot_token], nil)
     ?? __secret_get_optional(__first_secret_id([args?.bot_token_secret, args?.secrets?.bot_token_secret]))
     ?? __secret_get_optional("slack/bot-token")
-    ?? env("SLACK_BOT_TOKEN")
   if bot_token == nil || trim(to_string(bot_token)) == "" {
     return __err("missing_bot_token", "slack connector requires bot_token")
   }
@@ -1382,11 +1426,10 @@ fn __outbound_config(args) {
 }
 
 fn __socket_mode_config(args) {
-  let api_base_url = args?.api_base_url ?? env_or("SLACK_API_BASE_URL", SLACK_API_BASE_URL)
+  let api_base_url = args?.api_base_url ?? SLACK_API_BASE_URL
   let app_token = __first_secret_value([args?.app_token, args?.token, args?.secrets?.app_token], nil)
     ?? __secret_get_optional(__first_secret_id([args?.app_token_secret, args?.secrets?.app_token_secret]))
     ?? __secret_get_optional("slack/app-token")
-    ?? env("SLACK_APP_TOKEN")
   if app_token == nil || trim(to_string(app_token)) == "" {
     return __err("missing_app_token", "Slack Socket Mode requires app_token")
   }
