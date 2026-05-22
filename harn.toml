@@ -1,7 +1,7 @@
 [package]
 name = "harn-slack-connector"
 version = "0.1.0"
-description = "Pure-Harn Slack connector: Events API signatures, URL handshake, source-rich triage normalization, Socket Mode, and Web API dispatch."
+description = "Pure-Harn Slack connector: Events API signatures, URL verification, triage source metadata, Socket Mode, and Web API dispatch."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/burin-labs/harn-slack-connector"
 
@@ -45,7 +45,7 @@ missing_scopes = "Grant the bot and app scopes required by the configured Slack 
 inaccessible_resource = "Invite or authorize the Slack app for the target workspace, channels, and conversations."
 transient_provider_outage = "Retry after Slack API, Events API, or Socket Mode endpoints are healthy."
 
-# Harn-side package dependencies live here. This package currently has none.
+# Harn-side package dependencies. This package currently has none.
 [dependencies]
 
 [connector_contract]
