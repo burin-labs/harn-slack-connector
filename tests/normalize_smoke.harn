@@ -1,11 +1,18 @@
 import { normalize_inbound, shutdown } from "../src/lib"
-import { assert_slack_interface, fixture_body, signed_raw, slack_headers } from "./helpers"
+import {
+  assert_slack_interface,
+  fixture_body,
+  fixture_received_at,
+  fixture_ts,
+  signed_raw,
+  slack_headers,
+} from "./helpers"
 
-pipeline default() {
+pipeline test_normalize_smoke(harness) {
   let secret = "test-signing-secret"
-  let ts = to_int(timestamp())
+  let ts = fixture_ts()
   assert_slack_interface()
-  let url_body = fixture_body("url_verification")
+  let url_body = fixture_body(harness, "url_verification")
   let url_result = normalize_inbound(signed_raw(secret, url_body, ts))
   assert_eq(url_result.type, "immediate_response", "url verification result type")
   assert_eq(url_result.immediate_response.status, 200, "url verification status")
@@ -16,12 +23,32 @@ pipeline default() {
     "url verification content type",
   )
   assert(url_result.event == nil, "url verification skips event")
-  let event_body = fixture_body("message_channel_1")
+  let event_body = fixture_body(harness, "message_channel_1")
   let event_result = normalize_inbound(signed_raw(secret, event_body, ts))
   assert_eq(event_result.type, "event", "event callback result type")
   assert_eq(event_result.event.kind, "message", "message event type")
   assert_eq(event_result.event.dedupe_key, "slack:event:Ev-message-1", "message dedupe key")
   assert_eq(event_result.event.payload.resource_id, "C111/1713650000.000100", "message resource id")
+  assert_eq(
+    event_result.event.headers["X-Slack-Signature"],
+    "[redacted]",
+    "signature header redacted",
+  )
+  assert(event_result.event.headers["x-slack-signature"] == nil, "raw signature header is omitted")
+  assert_eq(
+    event_result.event.payload.provider_raw.headers["X-Slack-Signature"],
+    "[redacted]",
+    "provider raw signature redacted",
+  )
+  let received_at_result = normalize_inbound(
+    {
+      signing_secret: secret,
+      body_text: event_body,
+      headers: slack_headers(secret, event_body, ts),
+      received_at: fixture_received_at(),
+    },
+  )
+  assert_eq(received_at_result.type, "event", "received_at can drive replay window checks")
   let retry_result = normalize_inbound(
     signed_raw(
       secret,

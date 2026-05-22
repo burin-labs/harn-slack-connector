@@ -8,6 +8,20 @@ import {
   shutdown,
 } from "../src/lib"
 
+let TEST_TS = 1713659999
+
+let TEST_RECEIVED_AT = "2024-04-21T00:39:59Z"
+
+/** Return a fixed timestamp inside Slack's signature replay window for deterministic fixtures. */
+pub fn fixture_ts() {
+  return TEST_TS
+}
+
+/** Return the fixed RFC3339 timestamp matching fixture_ts(). */
+pub fn fixture_received_at() {
+  return TEST_RECEIVED_AT
+}
+
 /** Build signed Slack request headers for fixture webhook bodies. */
 pub fn slack_headers(secret, body, ts) {
   let basestring = "v0:" + to_string(ts) + ":" + body
@@ -24,28 +38,28 @@ pub fn signed_raw(secret, body, ts, extra = nil) {
 }
 
 /** Read a Slack webhook fixture body by basename. */
-pub fn fixture_body(name) {
-  return read_file(source_dir() + "/fixtures/webhooks/" + name + ".json")
+pub fn fixture_body(harness, name) {
+  return harness.fs.read_text(source_dir() + "/fixtures/webhooks/" + name + ".json")
 }
 
 /** Build a signed raw Events API request for a named webhook fixture. */
-pub fn fixture_raw(name, secret, ts, extra = nil) {
-  return signed_raw(secret, fixture_body(name), ts, extra)
+pub fn fixture_raw(harness, name, secret, ts, extra = nil) {
+  return signed_raw(secret, fixture_body(harness, name), ts, extra)
 }
 
 /** Assert the public connector metadata and lifecycle exports stay usable. */
 pub fn assert_slack_interface() {
   shutdown()
-  assert_eq(provider_id(), "slack", "provider id")
-  assert_eq(kinds()[0], "webhook", "webhook kind")
-  assert_eq(payload_schema().harn_schema_name, "SlackEventPayload", "payload schema name")
-  assert_eq(payload_schema().json_schema.type, "object", "payload schema json object")
+  require provider_id() == "slack", "provider id"
+  require kinds()[0] == "webhook", "webhook kind"
+  require payload_schema().harn_schema_name == "SlackEventPayload", "payload schema name"
+  require payload_schema().json_schema.type == "object", "payload schema json object"
   let methods = outbound_methods()
-  assert_eq(methods[0].method, "apps.connections.open", "method policies are exposed")
-  assert_eq(methods[2].method, "chat.postMessage", "write method is listed")
-  assert_eq(methods[2].requires_approval, true, "write method requires approval")
+  require methods[0].method == "apps.connections.open", "method policies are exposed"
+  require methods[2].method == "chat.postMessage", "write method is listed"
+  require methods[2].requires_approval, "write method requires approval"
   let initialized = init({signing_secret: "test-secret", include_bot_messages: false})
-  assert(initialized.initialized == true, "init stores state")
+  require initialized.initialized, "init stores state"
   let activated = activate([{id: "primary", path: "/slack/events", secrets: {signing_secret: "test-secret"}}])
-  assert_eq(activated.bindings, 1, "activate counts bindings")
+  require activated.bindings == 1, "activate counts bindings"
 }
