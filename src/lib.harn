@@ -203,7 +203,8 @@ pub fn socket_mode_connect(args = {}) {
     }
     let cfg = unwrap(config)
     let response = try {
-      http_post(
+      harness.net
+        .post(
         __slack_api_url(cfg.api_base_url, "apps.connections.open"),
         "{}",
         {
@@ -359,7 +360,8 @@ pub fn call(method, args = {}) {
     body = body.remove("user_id")
   }
   let response = try {
-    http_post(
+    harness.net
+      .post(
       __slack_api_url(cfg.api_base_url, method),
       json_stringify(body),
       {

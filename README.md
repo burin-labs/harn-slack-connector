@@ -2,16 +2,16 @@
 
 Pure-Harn Slack connector for the Harn orchestrator. It verifies inbound Events
 API signatures, handles URL verification, normalizes Slack events to the Harn
-`TriggerEvent` shape, supports Slack Socket Mode receive/ack loops, and
-dispatches outbound Web API calls. Normalized events include a source-rich
-triage adapter payload for Harn and Burin Home inbox workflows.
+`TriggerEvent` shape, receives and acks Socket Mode envelopes, and dispatches
+Web API calls. Events also include `harn.triage.source.v1` data for Harn and
+Burin Home inbox flows.
 
 This package implements Harn Connector Contract v1. Use the Harn CLI version
-pinned in `.harn-version` when developing or cutting releases. The canonical
-connector contract reference is the Harn trigger quick reference:
-https://harnlang.com/docs/llm/harn-triggers-quickref.html
+pinned in `.harn-version`. The connector contract and package authoring rules
+live in the
+[Harn connector authoring guide](https://github.com/burin-labs/harn/blob/main/docs/src/connectors/authoring.md).
 
-Slack expects an HTTP response within **3 seconds** for Events API delivery.
+Slack expects an HTTP response within 3 seconds for Events API delivery.
 `normalize_inbound(...)` is intentionally CPU-only: it verifies HMAC, parses
 JSON, returns an ack/result, and performs no outbound network work.
 
@@ -28,7 +28,7 @@ For local multi-repo development:
 harn-slack-connector = { path = "../harn-slack-connector" }
 ```
 
-## Events API Usage
+## Events API usage
 
 ```harn
 import { call } from "harn-slack-connector/default"
@@ -53,7 +53,7 @@ trigger respond on slack {
 }
 ```
 
-## Socket Mode Usage
+## Socket Mode usage
 
 Socket Mode uses a Slack app-level token (`xapp-...`) to open the WebSocket and
 the same normalization path as Events API for the inner payload.
@@ -84,12 +84,12 @@ pipeline socket_mode_worker() {
 can pass `socket_url` and use Harn `websocket_mock(...)`; production can omit
 `socket_url` and let the connector call `apps.connections.open`.
 
-## Slack App Setup
+## Slack app setup
 
 Create a Slack app with Events API enabled for HTTPS webhooks, or Socket Mode
-enabled for WebSocket delivery. Store secrets in the Harn secret provider, pass
-secret IDs, or pass direct values read from environment variables in local
-scripts:
+enabled for WebSocket delivery. Store secrets in the Harn secret provider. For
+tests and local scripts, pass secret IDs or direct values from environment
+variables:
 
 - `slack/signing-secret`: Events API signing secret.
 - `slack/bot-token`: bot token for Web API methods.
@@ -149,7 +149,7 @@ settings:
 For Socket Mode, set `socket_mode_enabled: true` and create an app-level token
 with `connections:write`.
 
-## Normalized Events
+## Normalized events
 
 Supported Events API and Socket Mode event types:
 
@@ -185,9 +185,8 @@ Each normalized event also carries:
 - `payload.triage`: `harn.triage.source.v1` adapter data for Start My Day style
   inbox events, including source refs, actor IDs, mention/direct-message/thread
   hints, privacy flags, raw-payload provenance, and local/write action intents.
-- `payload.provider_raw`: Slack envelope, raw event, and safe canonical request
-  headers kept separate from normalized fields for audit; Slack signatures are
-  redacted before normalized events leave the connector.
+- `payload.provider_raw`: Slack envelope, raw event, and redacted canonical
+  request headers for audit; Slack signatures are never exposed.
 
 Webhook and Socket Mode normalization remain CPU-only. Exact Slack message
 permalinks should be hydrated later with `call("chat.getPermalink", ...)` using
@@ -197,18 +196,18 @@ intents so upstream hosts can gate them.
 
 ## Operations
 
-Slack automatically disables event subscriptions when delivery success remains
-too low over time. Keep the verify-and-ack path fast, alert on signature rejects
-and retry spikes, and keep handler/network work outside `normalize_inbound`.
-When Harn Cloud managed ingress is used, configure the connector package through
-`HARN_CLOUD_CONNECTORS_CONFIG` and store the webhook secret as
-`slack/signing-secret`, or set a binding-level `signing_secret_id`/
+Slack may temporarily disable Events API subscriptions after more than 95%
+delivery failures within 60 minutes. Keep the verify-and-ack path fast, alert
+on signature rejects and retry spikes, and keep handler/network work outside
+`normalize_inbound`. When Harn Cloud managed ingress is used, configure the
+connector package through `HARN_CLOUD_CONNECTORS_CONFIG` and store the webhook
+secret as `slack/signing-secret`, or set a binding-level `signing_secret_id` or
 `webhook_secret_id`.
 
 Local verification:
 
-- `harn connector test . --provider slack`
-- Harn Cloud local managed-ingress load smoke using the package checkout
+- `harn connector test "$(pwd)" --provider slack`
+- Harn Cloud local managed-ingress smoke using this package checkout
 
 ## Development
 
@@ -222,7 +221,7 @@ harn --version
 Run the local CI equivalent:
 
 ```sh
-harn connector test . --provider slack
+harn connector test "$(pwd)" --provider slack
 ```
 
 ## License
