@@ -2,7 +2,6 @@ import { normalize_inbound, shutdown } from "../src/lib"
 import {
   assert_slack_interface,
   fixture_body,
-  fixture_received_at,
   fixture_ts,
   signed_raw,
   slack_headers,
@@ -10,7 +9,7 @@ import {
 
 pipeline test_normalize_smoke(harness) {
   let secret = "test-signing-secret"
-  let ts = fixture_ts()
+  let ts = fixture_ts(harness)
   assert_slack_interface()
   let url_body = fixture_body(harness, "url_verification")
   let url_result = normalize_inbound(signed_raw(secret, url_body, ts))
@@ -40,15 +39,10 @@ pipeline test_normalize_smoke(harness) {
     "[redacted]",
     "provider raw signature redacted",
   )
-  let received_at_result = normalize_inbound(
-    {
-      signing_secret: secret,
-      body_text: event_body,
-      headers: slack_headers(secret, event_body, ts),
-      received_at: fixture_received_at(),
-    },
-  )
-  assert_eq(received_at_result.type, "event", "received_at can drive replay window checks")
+  let empty_body = normalize_inbound({signing_secret: secret, headers: slack_headers(secret, "", ts)})
+  assert_eq(empty_body.type, "reject", "empty body rejects (F12)")
+  assert_eq(empty_body.reject.status, 400, "empty body status")
+  assert_eq(empty_body.reject.body.error, "missing_body_text", "empty body error")
   let retry_result = normalize_inbound(
     signed_raw(
       secret,
@@ -81,7 +75,6 @@ pipeline test_normalize_smoke(harness) {
       signing_secret: secret,
       body_text: event_body + " ",
       headers: slack_headers(secret, event_body, ts),
-      now: ts,
     },
   )
   assert_eq(tampered.type, "reject", "tampered body rejects")
@@ -92,23 +85,18 @@ pipeline test_normalize_smoke(harness) {
       signing_secret: secret,
       body_text: event_body,
       headers: {"x-slack-request-timestamp": to_string(ts)},
-      now: ts,
     },
   )
   assert_eq(missing_signature.type, "reject", "missing signature rejects")
   assert_eq(missing_signature.reject.body.error, "missing_signature", "missing signature error")
-  let missing_now = normalize_inbound(
-    {signing_secret: secret, body_text: event_body, headers: slack_headers(secret, event_body, ts)},
-  )
-  assert_eq(missing_now.type, "reject", "missing now rejects")
-  assert_eq(missing_now.reject.body.error, "missing_now", "missing now error")
+  // F10: the connector now derives `now` from the trusted clock — callers can no
+  // longer plant a stale request-timestamp by overriding `raw.now`.
   let expired_ts = ts - 301
   let expired = normalize_inbound(
     {
       signing_secret: secret,
       body_text: event_body,
       headers: slack_headers(secret, event_body, expired_ts),
-      now: ts,
     },
   )
   assert_eq(expired.type, "reject", "expired timestamp rejects")
@@ -118,7 +106,6 @@ pipeline test_normalize_smoke(harness) {
       signing_secret: "wrong-secret",
       body_text: event_body,
       headers: slack_headers(secret, event_body, ts),
-      now: ts,
     },
   )
   assert_eq(wrong_secret.type, "reject", "wrong secret rejects")

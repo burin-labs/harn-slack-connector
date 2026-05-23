@@ -2,7 +2,9 @@ import { call } from "../src/lib"
 
 pipeline test_call_smoke(task) {
   http_mock_clear()
-  let base = "https://slack.test/api"
+  // F8: api_base_url is allowlisted to {slack.com, api.slack.com}; tests must
+  // use one of those hosts even when targeting the http_mock layer.
+  let base = "https://api.slack.com"
   let token = "xoxb-test-token"
   http_mock(
     "POST",
@@ -122,4 +124,12 @@ pipeline test_call_smoke(task) {
     "missing_bot_token",
     "bot token still required",
   )
+  // F8: outbound calls to non-allowlisted hosts must be rejected so that bot
+  // tokens never reach attacker-controlled origins.
+  let disallowed = call(
+    "chat.postMessage",
+    {api_base_url: "https://evil.example/api", bot_token: token, channel: "C111", text: "x"},
+  )
+  assert(is_err(disallowed), "non-allowlisted api_base_url rejected")
+  assert_eq(unwrap_err(disallowed).code, "disallowed_api_base_url", "disallowed host code")
 }

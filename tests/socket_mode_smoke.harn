@@ -24,7 +24,8 @@ pipeline test_socket_mode_smoke(harness) {
   websocket_close(conn.socket)
   transport_mock_clear()
   http_mock_clear()
-  let api_base = "https://slack.test/api"
+  // F8: api_base_url is allowlisted to {slack.com, api.slack.com}.
+  let api_base = "https://api.slack.com"
   let opened_url = "wss://socket.slack.test/app/opened"
   http_mock(
     "POST",

@@ -12,7 +12,7 @@ fn ref_by_kind(refs, kind) {
 
 pipeline test_triage_source(harness) {
   let secret = "triage-secret"
-  let ts = fixture_ts()
+  let ts = fixture_ts(harness)
   let message = normalize_inbound(fixture_raw(harness, "message_channel_1", secret, ts))
   let payload = message.event.payload
   assert_eq(payload.source.kind, "message", "message source kind")
