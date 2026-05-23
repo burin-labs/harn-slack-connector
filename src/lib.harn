@@ -2,6 +2,13 @@ let SLACK_PROVIDER_ID = "slack"
 
 let SLACK_API_BASE_URL = "https://slack.com/api"
 
+/**
+ * Hosts permitted for outbound Slack Web API calls. Caller-supplied
+ * `api_base_url` overrides are validated against this allowlist to prevent
+ * bot/app tokens from being shipped to attacker-controlled hosts.
+ */
+let SLACK_ALLOWED_API_HOSTS = ["slack.com", "api.slack.com"]
+
 let SLACK_SIGNATURE_WINDOW_SECONDS = 300
 
 let SLACK_REDACTED_HEADER_VALUE = "[redacted]"
@@ -155,7 +162,11 @@ pub fn shutdown() {
  * verify HMAC, parse JSON, return immediate_response, and never perform HTTP.
  */
 pub fn normalize_inbound(raw) {
-  let body_text = raw?.body_text ?? raw?.body ?? ""
+  let body_candidate = raw?.body_text ?? raw?.body
+  if body_candidate == nil || to_string(body_candidate) == "" {
+    return __reject({code: "missing_body_text", message: "slack webhook requires non-empty body_text"}, 400)
+  }
+  let body_text = to_string(body_candidate)
   let headers = raw?.headers ?? {}
   let verified = __verify_slack_signature(raw, headers, body_text)
   if is_err(verified) {
@@ -716,9 +727,20 @@ fn __secret_get_optional(secret_id) {
 }
 
 fn __include_bot_messages(raw) {
-  return raw?.include_bot_messages ?? raw?.config?.include_bot_messages
-    ?? __state()?.ctx?.include_bot_messages
-    ?? false
+  // Security: read from binding/ctx only — never from the attacker-controlled
+  // raw envelope. The binding-id lookup is the only raw-derived hop, and only
+  // selects a trusted binding entry.
+  let state = __state()
+  let bindings = state?.bindings ?? {}
+  let binding_id = raw?.metadata?.binding_id ?? raw?.binding_id
+  if binding_id != nil {
+    let binding = bindings.get(binding_id)
+    let from_binding = binding?.include_bot_messages ?? binding?.config?.include_bot_messages
+    if from_binding != nil {
+      return from_binding
+    }
+  }
+  return state?.ctx?.include_bot_messages ?? false
 }
 
 fn __verify_slack_signature(raw, headers, body_text) {
@@ -737,11 +759,16 @@ fn __verify_slack_signature(raw, headers, body_text) {
     return __err("invalid_timestamp", "x-slack-request-timestamp is not an integer")
   }
   let ts = unwrap(parsed_ts)
-  let resolved_now = __request_timestamp_seconds(raw)
-  if is_err(resolved_now) {
-    return resolved_now
+  if ts == nil {
+    return __err("invalid_timestamp", "x-slack-request-timestamp is not an integer")
   }
-  let now = unwrap(resolved_now)
+  // Security: derive `now` from the trusted clock only. Reading `raw.now`,
+  // `raw.metadata.now`, or `raw.received_at` lets the caller bypass the
+  // 5-minute replay window by claiming a stale request just arrived.
+  // We use the ambient `timestamp()` here (rather than `harness.clock.*`)
+  // because `normalize_inbound` runs inside the connector contract harness
+  // where the `harness` namespace is not bound.
+  let now = timestamp()
   if abs(now - ts) > SLACK_SIGNATURE_WINDOW_SECONDS {
     return __err(
       "expired_timestamp",
@@ -758,37 +785,6 @@ fn __verify_slack_signature(raw, headers, body_text) {
     return __err("invalid_signature", "x-slack-signature did not match the request body")
   }
   return Ok(true)
-}
-
-fn __request_timestamp_seconds(raw) {
-  let candidate = raw?.now ?? raw?.metadata?.now ?? raw?.received_at ?? raw?.metadata?.received_at
-  if candidate == nil {
-    return __err(
-      "missing_now",
-      "slack signature verification requires current time in raw.now, raw.metadata.now, or raw.received_at",
-    )
-  }
-  let kind = type_of(candidate)
-  if kind == "int" || kind == "float" {
-    return Ok(candidate)
-  }
-  let text = trim(to_string(candidate))
-  if text == "" {
-    return __err("missing_now", "slack signature verification current time was blank")
-  }
-  let numeric = try {
-    to_float(text)
-  }
-  if !is_err(numeric) && unwrap(numeric) != nil {
-    return Ok(unwrap(numeric))
-  }
-  let parsed = try {
-    date_parse(text)
-  }
-  if is_err(parsed) || unwrap(parsed) == nil {
-    return __err("invalid_now", "slack signature verification current time was not a timestamp")
-  }
-  return Ok(unwrap(parsed))
 }
 
 @complexity(allow)
@@ -1417,7 +1413,11 @@ fn __slack_permalink_request(channel, message_ts) {
 }
 
 fn __outbound_config(args) {
-  let api_base_url = args?.api_base_url ?? SLACK_API_BASE_URL
+  let api_base_url_check = __validate_api_base_url(args?.api_base_url)
+  if is_err(api_base_url_check) {
+    return api_base_url_check
+  }
+  let api_base_url = unwrap(api_base_url_check)
   let bot_token = __first_secret_value([args?.bot_token, args?.token, args?.secrets?.bot_token], nil)
     ?? __secret_get_optional(__first_secret_id([args?.bot_token_secret, args?.secrets?.bot_token_secret]))
     ?? __secret_get_optional("slack/bot-token")
@@ -1428,7 +1428,11 @@ fn __outbound_config(args) {
 }
 
 fn __socket_mode_config(args) {
-  let api_base_url = args?.api_base_url ?? SLACK_API_BASE_URL
+  let api_base_url_check = __validate_api_base_url(args?.api_base_url)
+  if is_err(api_base_url_check) {
+    return api_base_url_check
+  }
+  let api_base_url = unwrap(api_base_url_check)
   let app_token = __first_secret_value([args?.app_token, args?.token, args?.secrets?.app_token], nil)
     ?? __secret_get_optional(__first_secret_id([args?.app_token_secret, args?.secrets?.app_token_secret]))
     ?? __secret_get_optional("slack/app-token")
@@ -1456,4 +1460,65 @@ fn __slack_api_url(api_base_url, method) {
     return trimmed[0:len(trimmed) - 1] + "/" + method
   }
   return trimmed + "/" + method
+}
+
+/**
+ * Extract the host from a URL string (case-insensitive). Returns nil for
+ * inputs that don't look like an absolute http(s) URL.
+ */
+fn __extract_host(url) {
+  let trimmed = trim(to_string(url ?? ""))
+  if trimmed == "" {
+    return nil
+  }
+  let lower = lowercase(trimmed)
+  var rest = nil
+  if lower.starts_with("https://") {
+    rest = trimmed[8:len(trimmed)]
+  } else if lower.starts_with("http://") {
+    rest = trimmed[7:len(trimmed)]
+  } else {
+    return nil
+  }
+  // Strip optional userinfo and trailing path/query/fragment to isolate host.
+  let at_idx = rest.index_of("@")
+  if at_idx != nil && at_idx >= 0 {
+    rest = rest[at_idx + 1:len(rest)]
+  }
+  var end = len(rest)
+  for ch in ["/", "?", "#"] {
+    let idx = rest.index_of(ch)
+    if idx != nil && idx >= 0 && idx < end {
+      end = idx
+    }
+  }
+  var host = rest[0:end]
+  // Strip optional port (host:port).
+  let colon_idx = host.index_of(":")
+  if colon_idx != nil && colon_idx >= 0 {
+    host = host[0:colon_idx]
+  }
+  return lowercase(host)
+}
+
+/**
+ * Validate caller-supplied `api_base_url` against the connector allowlist.
+ * Returns Ok(trimmed_url) when accepted, or __err otherwise.
+ */
+fn __validate_api_base_url(api_base_url) {
+  if api_base_url == nil {
+    return Ok(SLACK_API_BASE_URL)
+  }
+  let text = trim(to_string(api_base_url))
+  if text == "" || text == SLACK_API_BASE_URL {
+    return Ok(SLACK_API_BASE_URL)
+  }
+  let host = __extract_host(text)
+  if host == nil {
+    return __err("invalid_api_base_url", "slack api_base_url must be an absolute http(s) URL")
+  }
+  if !contains(SLACK_ALLOWED_API_HOSTS, host) {
+    return __err("disallowed_api_base_url", "slack api_base_url host `" + host + "` is not in the allowlist")
+  }
+  return Ok(text)
 }

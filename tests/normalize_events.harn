@@ -1,9 +1,9 @@
-import { normalize_inbound, shutdown } from "../src/lib"
+import { init, normalize_inbound, shutdown } from "../src/lib"
 import { fixture_raw, fixture_ts } from "./helpers"
 
 fn assert_event(harness, name, expected_type, expected_resource, expected_user, expected_text) {
   let secret = "event-secret"
-  let ts = fixture_ts()
+  let ts = fixture_ts(harness)
   let result = normalize_inbound(fixture_raw(harness, name, secret, ts))
   require result.type == "event", name + " result type"
   require result.event.kind == expected_type, name + " kind"
@@ -100,14 +100,23 @@ pipeline test_normalize_events(harness) {
     "",
   )
   let secret = "event-secret"
-  let ts = fixture_ts()
+  let ts = fixture_ts(harness)
   let ignored_bot = normalize_inbound(fixture_raw(harness, "message_bot", secret, ts))
   assert_eq(ignored_bot.type, "immediate_response", "bot message ack type")
   assert_eq(ignored_bot.immediate_response.status, 200, "bot message ack")
   assert(ignored_bot.event == nil, "bot messages are ignored by default")
-  let included_bot = normalize_inbound(fixture_raw(harness, "message_bot", secret, ts, {include_bot_messages: true}))
+  // F11: include_bot_messages must come from the binding/ctx, not the
+  // attacker-controlled raw envelope. Opt in via init ctx for this assertion.
+  shutdown()
+  init({include_bot_messages: true})
+  let included_bot = normalize_inbound(fixture_raw(harness, "message_bot", secret, ts))
   assert_eq(included_bot.type, "event", "bot opt-in result type")
   assert_eq(included_bot.event.kind, "message", "bot opt-in event type")
   assert_eq(included_bot.event.payload.text, "bot echo", "bot opt-in text")
+  // Setting it on the raw envelope alone must NOT enable bot passthrough.
+  shutdown()
+  let raw_opt_in = normalize_inbound(fixture_raw(harness, "message_bot", secret, ts, {include_bot_messages: true}))
+  assert_eq(raw_opt_in.type, "immediate_response", "raw envelope cannot enable bot opt-in")
+  assert(raw_opt_in.event == nil, "raw envelope include_bot_messages ignored")
   shutdown()
 }

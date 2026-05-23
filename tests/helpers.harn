@@ -8,18 +8,17 @@ import {
   shutdown,
 } from "../src/lib"
 
-let TEST_TS = 1713659999
-
-let TEST_RECEIVED_AT = "2024-04-21T00:39:59Z"
-
-/** Return a fixed timestamp inside Slack's signature replay window for deterministic fixtures. */
-pub fn fixture_ts() {
-  return TEST_TS
-}
-
-/** Return the fixed RFC3339 timestamp matching fixture_ts(). */
-pub fn fixture_received_at() {
-  return TEST_RECEIVED_AT
+/**
+ * Return an integer Unix-seconds timestamp inside Slack's 5-minute
+ * signature replay window.
+ *
+ * After F10 the connector verifies request freshness against the trusted
+ * clock (`harness.clock.timestamp()`), so fixtures must sign with a current
+ * timestamp rather than a hard-coded value. Slack request timestamps are
+ * always whole seconds, so we truncate the float here.
+ */
+pub fn fixture_ts(harness) {
+  return to_int(harness.clock.timestamp())
 }
 
 /** Build signed Slack request headers for fixture webhook bodies. */
@@ -31,9 +30,14 @@ pub fn slack_headers(secret, body, ts) {
   }
 }
 
-/** Build a raw Events API request wrapper around a signed fixture body. */
+/**
+ * Build a raw Events API request wrapper around a signed fixture body.
+ *
+ * After F10 the connector ignores `raw.now`/`raw.received_at` and uses the
+ * trusted clock, so this builder no longer plants those fields.
+ */
 pub fn signed_raw(secret, body, ts, extra = nil) {
-  let raw = {signing_secret: secret, body_text: body, headers: slack_headers(secret, body, ts), now: ts}
+  let raw = {signing_secret: secret, body_text: body, headers: slack_headers(secret, body, ts)}
   return raw + extra ?? {}
 }
 
