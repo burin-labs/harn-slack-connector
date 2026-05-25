@@ -765,10 +765,7 @@ fn __verify_slack_signature(raw, headers, body_text) {
   // Security: derive `now` from the trusted clock only. Reading `raw.now`,
   // `raw.metadata.now`, or `raw.received_at` lets the caller bypass the
   // 5-minute replay window by claiming a stale request just arrived.
-  // We use the ambient `timestamp()` here (rather than `harness.clock.*`)
-  // because `normalize_inbound` runs inside the connector contract harness
-  // where the `harness` namespace is not bound.
-  let now = timestamp()
+  let now = date_now().timestamp
   if abs(now - ts) > SLACK_SIGNATURE_WINDOW_SECONDS {
     return __err(
       "expired_timestamp",

@@ -1,6 +1,7 @@
 import { call } from "../src/lib"
 
 pipeline test_call_smoke(task) {
+  egress_policy({allow: ["api.slack.com"], default: "deny"})
   http_mock_clear()
   // F8: api_base_url is allowlisted to {slack.com, api.slack.com}; tests must
   // use one of those hosts even when targeting the http_mock layer.
