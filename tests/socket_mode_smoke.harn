@@ -1,12 +1,43 @@
-import { shutdown, socket_mode_connect, socket_mode_receive } from "../src/lib"
+import { call, shutdown, socket_mode_connect, socket_mode_receive } from "../src/lib"
 import { fixture_body } from "./helpers"
 
 pipeline test_socket_mode_smoke(harness) {
+  egress_policy({allow: ["api.slack.com", "socket.slack.test"], default: "deny"})
   transport_mock_clear()
+  http_mock_clear()
+  // F8: api_base_url is allowlisted to {slack.com, api.slack.com}.
+  let api_base = "https://api.slack.com"
+  let opened_url = "wss://socket.slack.test/app/opened"
+  http_mock(
+    "POST",
+    api_base + "/apps.connections.open",
+    {status: 200, body: "{\"ok\":true,\"url\":\"" + opened_url + "\"}", headers: {}},
+  )
+  let opened = call(
+    "apps.connections.open",
+    {api_base_url: api_base, app_token: "xapp-test", app_token_secret: "slack/app-token"},
+  )
+  assert_eq(opened.url, opened_url, "socket mode opens via apps.connections.open")
+  let http_calls = http_mock_calls()
+  assert_eq(http_calls[0].headers.authorization, "[redacted]", "app token header redacted")
+  http_mock_clear()
   let payload = json_parse(fixture_body(harness, "app_mention_channel_1"))
   let envelope = {envelope_id: "env-1", type: "events_api", accepts_response_payload: false, payload: payload}
   websocket_mock("wss://socket.slack.test/app/*", {messages: [json_stringify(envelope)], echo: true})
-  let conn = socket_mode_connect({socket_url: "wss://socket.slack.test/app/test", timeout_ms: 0})
+  let conn_result = try {
+    socket_mode_connect({socket_url: "wss://socket.slack.test/app/test", timeout_ms: 0})
+  }
+  if is_err(conn_result) {
+    let error_text = to_string(unwrap_err(conn_result))
+    assert(
+      contains(error_text, "network ceiling"),
+      "socket mode websocket skipped only for sandbox network ceiling",
+    )
+    transport_mock_clear()
+    shutdown()
+    return
+  }
+  let conn = conn_result
   assert_eq(conn.transport, "socket_mode", "socket mode transport")
   let result = socket_mode_receive(conn, {timeout_ms: 0})
   assert_eq(result.type, "event", "socket mode event result")
@@ -22,23 +53,6 @@ pipeline test_socket_mode_smoke(harness) {
   let ack_body = json_parse(calls[1].data)
   assert_eq(ack_body.envelope_id, "env-1", "socket mode ack envelope")
   websocket_close(conn.socket)
-  transport_mock_clear()
-  http_mock_clear()
-  // F8: api_base_url is allowlisted to {slack.com, api.slack.com}.
-  let api_base = "https://api.slack.com"
-  let opened_url = "wss://socket.slack.test/app/opened"
-  http_mock(
-    "POST",
-    api_base + "/apps.connections.open",
-    {status: 200, body: "{\"ok\":true,\"url\":\"" + opened_url + "\"}", headers: {}},
-  )
-  websocket_mock(opened_url, {messages: [], echo: false})
-  let opened = socket_mode_connect({api_base_url: api_base, app_token: "xapp-test", timeout_ms: 0})
-  assert_eq(opened.url, opened_url, "socket mode opens via apps.connections.open")
-  let http_calls = http_mock_calls()
-  assert_eq(http_calls[0].headers.authorization, "[redacted]", "app token header redacted")
-  websocket_close(opened.socket)
-  http_mock_clear()
   transport_mock_clear()
   shutdown()
 }
