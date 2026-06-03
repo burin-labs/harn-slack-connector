@@ -41,6 +41,20 @@ pub fn signed_raw(secret, body, ts, extra = nil) {
   return raw + extra ?? {}
 }
 
+/**
+ * Build a signed raw `application/x-www-form-urlencoded` request (slash
+ * commands and interactivity payloads). Slack signs the raw body the same way
+ * as the Events API, so we reuse `slack_headers` and add the form content-type.
+ */
+pub fn signed_form_raw(secret, body, ts, extra = nil) {
+  let raw = {
+    signing_secret: secret,
+    body_text: body,
+    headers: slack_headers(secret, body, ts) + {"content-type": "application/x-www-form-urlencoded"},
+  }
+  return raw + extra ?? {}
+}
+
 /** Read a Slack webhook fixture body by basename. */
 pub fn fixture_body(harness, name) {
   return harness.fs.read_text(source_dir() + "/fixtures/webhooks/" + name + ".json")

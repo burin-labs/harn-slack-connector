@@ -1,0 +1,46 @@
+import { shutdown, socket_mode_connect } from "../src/lib"
+
+/**
+ * C4 secure default: Socket Mode is OFF by default. socket_mode_connect must
+ * refuse to open a WebSocket unless it is explicitly enabled AND an app-level
+ * `xapp-` token is present — even when a socket_url is supplied.
+ */
+pipeline test_socket_mode_optin(harness) {
+  egress_policy({allow: ["api.slack.com", "socket.slack.test"], default: "deny"})
+  transport_mock_clear()
+  shutdown()
+  // No enable flag at all: refused, and NO websocket opened.
+  let disabled = socket_mode_connect(
+    {socket_url: "wss://socket.slack.test/app/test", app_token: "xapp-test", timeout_ms: 0},
+  )
+  assert(is_err(disabled), "socket mode refuses without enable flag")
+  assert_eq(unwrap_err(disabled).code, "socket_mode_disabled", "disabled code")
+  assert_eq(len(transport_mock_calls()), 0, "no websocket opened when disabled")
+  // Enabled but no xapp- token: refused (token gate).
+  let no_token = socket_mode_connect(
+    {
+      socket_url: "wss://socket.slack.test/app/test",
+      enable_socket_mode: true,
+      app_token: "wrong",
+      timeout_ms: 0,
+      api_base_url: "https://api.slack.com",
+    },
+  )
+  assert(is_err(no_token), "socket mode refuses without xapp- token")
+  assert_eq(unwrap_err(no_token).code, "missing_app_token", "missing app token code")
+  assert_eq(len(transport_mock_calls()), 0, "no websocket opened without xapp- token")
+  // A non-true enable value (e.g. a stray string) must NOT enable.
+  let stringy = socket_mode_connect(
+    {
+      socket_url: "wss://socket.slack.test/app/test",
+      enable_socket_mode: "true",
+      app_token: "xapp-test",
+      timeout_ms: 0,
+    },
+  )
+  assert(is_err(stringy), "non-boolean enable value does not enable socket mode")
+  assert_eq(unwrap_err(stringy).code, "socket_mode_disabled", "stringy enable stays disabled")
+  assert_eq(len(transport_mock_calls()), 0, "no websocket opened for stringy enable")
+  transport_mock_clear()
+  shutdown()
+}

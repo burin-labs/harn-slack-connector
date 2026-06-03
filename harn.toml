@@ -1,6 +1,6 @@
 [package]
 name = "harn-slack-connector"
-version = "0.1.0"
+version = "0.2.0"
 description = "Pure-Harn Slack connector: Events API signatures, URL verification, triage source metadata, Socket Mode, and Web API dispatch."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/burin-labs/harn-slack-connector"
@@ -11,6 +11,12 @@ default = "src/lib.harn"
 [[providers]]
 id = "slack"
 connector = { harn = "src/lib.harn" }
+# `streaming` advertises Socket Mode support, but Socket Mode is OFF by default.
+# socket_mode_connect refuses to open a WebSocket unless it is explicitly
+# enabled (args.enable_socket_mode / binding / ctx socket_mode.enabled) AND an
+# app-level `xapp-` token is present. The default delivery path is HTTP Events.
+# socket_mode_connect is never reached from normalize_inbound (CPU-only hot
+# path; effect policy denies network there).
 capabilities = ["webhook", "oauth", "streaming"]
 oauth = { resource = "https://slack.com/api/", authorization_endpoint = "https://slack.com/oauth/v2/authorize", token_endpoint = "https://slack.com/api/oauth.v2.access", scopes = "app_mentions:read chat:write", token_endpoint_auth_method = "client_secret_post" }
 
