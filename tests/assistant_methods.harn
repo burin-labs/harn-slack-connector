@@ -1,0 +1,78 @@
+import { call, outbound_methods } from "../src/lib"
+
+fn method_policy(methods, name) {
+  for policy in methods {
+    if policy.method == name {
+      return policy
+    }
+  }
+  return nil
+}
+
+/**
+ * C4 coverage: the new outbound reply + Assistant methods dispatch correctly,
+ * are listed as approval-gated bot-token methods, and require the
+ * `assistant:write` scope (documented in the README).
+ */
+pipeline test_assistant_methods(harness) {
+  let methods = outbound_methods()
+  for name in [
+    "chat.postEphemeral",
+    "assistant.threads.setStatus",
+    "assistant.threads.setSuggestedPrompts",
+    "assistant.threads.setTitle",
+  ] {
+    let policy = method_policy(methods, name)
+    assert(policy != nil, name + " is listed in outbound_methods")
+    assert_eq(policy.token_kind, "bot", name + " uses bot token")
+    assert_eq(policy.mutates_provider, true, name + " mutates provider")
+    assert_eq(policy.requires_approval, true, name + " requires approval")
+  }
+  egress_policy({allow: ["api.slack.com"], default: "deny"})
+  http_mock_clear()
+  let base = "https://api.slack.com"
+  let token = "xoxb-test-token"
+  http_mock("POST", base + "/*", {status: 200, body: "{\"ok\":true}", headers: {}})
+  let ephemeral = call(
+    "chat.postEphemeral",
+    {api_base_url: base, bot_token: token, channel: "C111", user: "U1", text: "only you"},
+  )
+  assert_eq(ephemeral.ok, true, "chat.postEphemeral ok")
+  call(
+    "assistant.threads.setStatus",
+    {api_base_url: base, bot_token: token, channel_id: "D1", thread_ts: "1.1", status: "is thinking..."},
+  )
+  call(
+    "assistant.threads.setSuggestedPrompts",
+    {
+      api_base_url: base,
+      bot_token: token,
+      channel_id: "D1",
+      thread_ts: "1.1",
+      prompts: [{title: "Summarize", message: "Summarize this thread"}],
+    },
+  )
+  call(
+    "assistant.threads.setTitle",
+    {api_base_url: base, bot_token: token, channel_id: "D1", thread_ts: "1.1", title: "Deploy chat"},
+  )
+  let calls = http_mock_calls()
+  assert_eq(len(calls), 4, "all assistant + ephemeral methods dispatched")
+  assert_eq(calls[0].url, base + "/chat.postEphemeral", "ephemeral URL")
+  assert_eq(calls[1].url, base + "/assistant.threads.setStatus", "setStatus URL")
+  assert_eq(calls[2].url, base + "/assistant.threads.setSuggestedPrompts", "setSuggestedPrompts URL")
+  assert_eq(calls[3].url, base + "/assistant.threads.setTitle", "setTitle URL")
+  assert_eq(calls[0].headers.authorization, "[redacted]", "ephemeral auth redacted")
+  let status_body = json_parse(calls[1].body)
+  assert_eq(status_body.status, "is thinking...", "setStatus body status")
+  let title_body = json_parse(calls[3].body)
+  assert_eq(title_body.title, "Deploy chat", "setTitle body title")
+  // assistant methods need an app/bot token like every other write method.
+  let no_token = call(
+    "assistant.threads.setTitle",
+    {api_base_url: base, app_token: "xapp-x", channel_id: "D1", thread_ts: "1.1", title: "x"},
+  )
+  assert(is_err(no_token), "assistant method requires bot token")
+  assert_eq(unwrap_err(no_token).code, "missing_bot_token", "assistant method bot token required")
+  http_mock_clear()
+}

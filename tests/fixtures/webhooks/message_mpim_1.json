@@ -1,0 +1,1 @@
+{"token":"legacy-token","team_id":"T123","api_app_id":"A123","event":{"client_msg_id":"m-mpim-1","type":"message","text":"group dm hello","user":"U950","ts":"1713650500.000100","team":"T123","channel":"G950","event_ts":"1713650500.000100","channel_type":"mpim"},"type":"event_callback","event_id":"Ev-message-mpim-1","event_time":1713650500}

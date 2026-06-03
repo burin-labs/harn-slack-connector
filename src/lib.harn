@@ -47,6 +47,25 @@ let SLACK_OUTBOUND_METHOD_POLICIES = [
   {method: "reactions.remove", mutates_provider: true, requires_approval: true, token_kind: "bot"},
   {method: "views.open", mutates_provider: true, requires_approval: true, token_kind: "bot"},
   {method: "views.update", mutates_provider: true, requires_approval: true, token_kind: "bot"},
+  {method: "chat.postEphemeral", mutates_provider: true, requires_approval: true, token_kind: "bot"},
+  {
+    method: "assistant.threads.setStatus",
+    mutates_provider: true,
+    requires_approval: true,
+    token_kind: "bot",
+  },
+  {
+    method: "assistant.threads.setSuggestedPrompts",
+    mutates_provider: true,
+    requires_approval: true,
+    token_kind: "bot",
+  },
+  {
+    method: "assistant.threads.setTitle",
+    mutates_provider: true,
+    requires_approval: true,
+    token_kind: "bot",
+  },
 ]
 
 var SLACK_STATE = {initialized: false, active: false, bindings: {}, ctx: {}}
@@ -95,7 +114,16 @@ pub fn payload_schema() {
         event: {type: "object"},
         event_type: {
           type: "string",
-          enum: ["message", "app_mention", "reaction_added", "app_home_opened", "assistant_thread_started"],
+          enum: [
+            "message",
+            "app_mention",
+            "reaction_added",
+            "app_home_opened",
+            "assistant_thread_started",
+            "assistant_thread_context_changed",
+            "slash_command",
+            "interactivity",
+          ],
         },
         resource_id: {type: "string"},
         channel: {type: "string"},
@@ -172,6 +200,12 @@ pub fn normalize_inbound(raw) {
   if is_err(verified) {
     return __reject(unwrap_err(verified), 403)
   }
+  // Slash commands and interactivity payloads arrive as
+  // `application/x-www-form-urlencoded` bodies signed with the same HMAC the
+  // Events API path verifies above. Route them before the JSON parse.
+  if __is_form_encoded(headers, body_text) {
+    return __normalize_form_inbound(body_text, raw)
+  }
   let parsed = try {
     json_parse(body_text)
   }
@@ -203,8 +237,21 @@ pub fn normalize_inbound(raw) {
   return {type: "event", event: event}
 }
 
-/** Open a Slack Socket Mode WebSocket using an app-level token, or a supplied mock URL in tests. */
+/**
+ * Open a Slack Socket Mode WebSocket using an app-level token, or a supplied
+ * mock URL in tests.
+ *
+ * Security: Socket Mode is OFF by default. This is the only path that opens a
+ * WebSocket, and it is never reached from `normalize_inbound` (the inbound hot
+ * path is CPU-only and the effect policy denies network there). The connector
+ * connects only when Socket Mode is explicitly enabled AND an app-level
+ * `xapp-` token is present; otherwise callers should use the HTTP Events path.
+ */
 pub fn socket_mode_connect(args = {}) {
+  let enabled = __socket_mode_enabled(args ?? {})
+  if is_err(enabled) {
+    return enabled
+  }
   let socket_url = args?.socket_url ?? args?.url
   var resolved_url = socket_url
   if resolved_url == nil || trim(to_string(resolved_url)) == "" {
@@ -942,7 +989,240 @@ fn __normalize_event_callback(payload, raw) {
       __canonical_slack_headers(raw?.headers ?? {}),
     )
   }
+  if event_type == "assistant_thread_context_changed" {
+    let assistant_thread = event?.assistant_thread ?? {}
+    let channel = assistant_thread?.channel_id ?? assistant_thread?.context?.channel_id ?? event?.channel ?? ""
+    let thread_ts = assistant_thread?.thread_ts ?? event?.event_ts
+    let resource_id = channel + "/" + to_string(thread_ts ?? "")
+    let dedupe_key = __dedupe_key(payload, event_type, resource_id)
+    let normalized_payload = __payload_with_normalized_fields(
+      payload,
+      {
+        provider: SLACK_PROVIDER_ID,
+        event_type: event_type,
+        resource_id: resource_id,
+        channel: channel,
+        channel_type: event?.channel_type,
+        message_ts: thread_ts,
+        thread_ts: thread_ts,
+        user: {id: assistant_thread?.user_id ?? event?.user ?? "", name: event?.user_name ?? event?.username},
+        text: "",
+        assistant_thread: assistant_thread,
+        context: assistant_thread?.context,
+        retry: retry_info,
+        metrics: __slack_metrics(retry_info),
+        occurred_at: event?.event_ts ?? payload?.event_time,
+        raw: event,
+      },
+      raw,
+      dedupe_key,
+    )
+    return __event_result(
+      event_type,
+      dedupe_key,
+      normalized_payload,
+      __canonical_slack_headers(raw?.headers ?? {}),
+    )
+  }
   return __err("unsupported_event", "unsupported Slack event type `" + to_string(event_type) + "`")
+}
+
+/**
+ * Detect `application/x-www-form-urlencoded` slash-command/interactivity
+ * bodies. Falls back to body sniffing when the content-type header is absent
+ * (Slack always sends the header, but tests and proxies may omit it).
+ */
+fn __is_form_encoded(headers, body_text) {
+  let content_type = lowercase(to_string(__header(headers, "content-type") ?? ""))
+  if contains(content_type, "application/x-www-form-urlencoded") {
+    return true
+  }
+  if content_type != "" {
+    return false
+  }
+  let trimmed = trim(to_string(body_text ?? ""))
+  if trimmed == "" || trimmed.starts_with("{") || trimmed.starts_with("[") {
+    return false
+  }
+  return contains(trimmed, "=") && !contains(trimmed, "\n")
+}
+
+/** Parse a urlencoded body into a flat dict of first-wins string fields. */
+fn __form_fields(body_text) {
+  let parsed = try {
+    query_parse(to_string(body_text ?? ""))
+  }
+  if is_err(parsed) {
+    return __err("invalid_form_body", "slack form body could not be parsed")
+  }
+  var fields = {}
+  for pair in unwrap(parsed) ?? [] {
+    let key = to_string(pair?.key ?? "")
+    if key != "" && fields.get(key) == nil {
+      fields[key] = pair?.value
+    }
+  }
+  return Ok(fields)
+}
+
+/**
+ * Normalize a urlencoded Slack POST into either a `slash_command` or
+ * `interactivity` envelope. Interactivity payloads carry a `payload=<json>`
+ * field; slash commands carry flat `command`/`text`/... fields.
+ */
+fn __normalize_form_inbound(body_text, raw) {
+  let fields_result = __form_fields(body_text)
+  if is_err(fields_result) {
+    return __reject(unwrap_err(fields_result), 400)
+  }
+  let fields = unwrap(fields_result)
+  if fields.get("payload") != nil {
+    return __normalize_interactivity(to_string(fields.payload), raw)
+  }
+  return __normalize_slash_command(fields, raw)
+}
+
+/** Normalize a Slack slash-command form POST into a `slash_command` envelope. */
+fn __normalize_slash_command(fields, raw) {
+  let command = to_string(fields?.command ?? "")
+  let text = to_string(fields?.text ?? "")
+  let channel = to_string(fields?.channel_id ?? "")
+  let user_id = to_string(fields?.user_id ?? "")
+  let team_id = fields?.team_id ?? fields?.team_domain
+  let trigger_id = fields?.trigger_id
+  let response_url = fields?.response_url
+  let resource_id = channel + "/" + command
+  let dedupe_key = if trigger_id != nil && trim(to_string(trigger_id)) != "" {
+    "slack:slash:" + to_string(trigger_id)
+  } else {
+    "slack:slash:" + to_string(team_id ?? "unknown-team") + ":" + channel + ":" + command
+  }
+  let normalized = {
+    provider: SLACK_PROVIDER_ID,
+    event_type: "slash_command",
+    resource_id: resource_id,
+    channel: channel,
+    channel_type: __slash_channel_type(channel, fields),
+    message_ts: nil,
+    thread_ts: nil,
+    user: {id: user_id, name: fields?.user_name},
+    text: text,
+    command: command,
+    response_url: response_url,
+    trigger_id: trigger_id,
+    api_app_id: fields?.api_app_id,
+    enterprise_id: fields?.enterprise_id,
+    raw: fields,
+  }
+  let envelope = {
+    type: "event_callback",
+    event_id: nil,
+    event_time: nil,
+    team_id: team_id,
+    api_app_id: fields?.api_app_id,
+    enterprise_id: fields?.enterprise_id,
+  }
+  let normalized_payload = __payload_with_normalized_fields(envelope, normalized, raw, dedupe_key)
+  let payload = normalized_payload
+    + {agent_summon: __agent_summon(normalized, normalized_payload?.source, "slash_command")}
+  return {
+    type: "event",
+    event: __event_result("slash_command", dedupe_key, payload, __canonical_slack_headers(raw?.headers ?? {})),
+  }
+}
+
+/** Normalize a Slack interactivity `payload=<json>` POST into an `interactivity` envelope. */
+fn __normalize_interactivity(payload_json, raw) {
+  let parsed = try {
+    json_parse(payload_json)
+  }
+  if is_err(parsed) {
+    return __reject(
+      {code: "invalid_interactivity_payload", message: "slack interactivity payload is not valid JSON"},
+      400,
+    )
+  }
+  let payload = unwrap(parsed)
+  let interaction_type = to_string(payload?.type ?? "")
+  let channel = to_string(payload?.channel?.id ?? payload?.container?.channel_id ?? "")
+  let user_id = to_string(payload?.user?.id ?? "")
+  let team_id = payload?.team?.id ?? payload?.user?.team_id
+  let thread_ts = payload?.message?.thread_ts ?? payload?.container?.thread_ts
+  let action_id = __interactivity_action_id(payload)
+  let resource_base = if action_id != nil && action_id != "" {
+    action_id
+  } else {
+    interaction_type
+  }
+  let resource_id = channel + "/" + to_string(resource_base)
+  let dedupe_key = if payload?.trigger_id != nil && trim(to_string(payload.trigger_id)) != "" {
+    "slack:interactivity:" + to_string(payload.trigger_id)
+  } else {
+    "slack:interactivity:" + to_string(team_id ?? "unknown-team") + ":" + channel + ":"
+      + to_string(resource_base)
+  }
+  let normalized = {
+    provider: SLACK_PROVIDER_ID,
+    event_type: "interactivity",
+    resource_id: resource_id,
+    channel: channel,
+    channel_type: payload?.channel?.channel_type,
+    message_ts: payload?.message?.ts,
+    thread_ts: thread_ts,
+    user: {id: user_id, name: payload?.user?.username ?? payload?.user?.name},
+    text: "",
+    interaction_type: interaction_type,
+    action_id: action_id,
+    callback_id: payload?.view?.callback_id ?? payload?.callback_id,
+    response_url: payload?.response_url,
+    trigger_id: payload?.trigger_id,
+    api_app_id: payload?.api_app_id,
+    view: payload?.view,
+    actions: payload?.actions,
+    raw: payload,
+  }
+  let envelope = {
+    type: "event_callback",
+    event_id: nil,
+    event_time: nil,
+    team_id: team_id,
+    api_app_id: payload?.api_app_id,
+    enterprise_id: payload?.enterprise?.id,
+  }
+  let normalized_payload = __payload_with_normalized_fields(envelope, normalized, raw, dedupe_key)
+  return {
+    type: "event",
+    event: __event_result(
+      "interactivity",
+      dedupe_key,
+      normalized_payload,
+      __canonical_slack_headers(raw?.headers ?? {}),
+    ),
+  }
+}
+
+/** Resolve the first block-action id from an interactivity payload, if any. */
+fn __interactivity_action_id(payload) {
+  let actions = payload?.actions ?? []
+  if len(actions) > 0 {
+    return actions[0]?.action_id ?? actions[0]?.block_id
+  }
+  return nil
+}
+
+/** Classify a slash-command channel by id prefix when channel_type is absent. */
+fn __slash_channel_type(channel, fields) {
+  let declared = fields?.channel_type
+  if declared != nil && trim(to_string(declared)) != "" {
+    return to_string(declared)
+  }
+  if starts_with(to_string(channel), "D") {
+    return "im"
+  }
+  if starts_with(to_string(channel), "G") {
+    return "group"
+  }
+  return nil
 }
 
 fn __event_result(kind, dedupe_key, payload, headers = nil) {
@@ -953,6 +1233,81 @@ fn __event_result(kind, dedupe_key, payload, headers = nil) {
     headers: headers,
     signature_status: {state: "verified"},
   }
+}
+
+/**
+ * Classify a Slack channel into the canonical agent_summon channel_kind:
+ * `public` | `private` | `im` | `mpim`. Prefers Slack `channel_type`, then
+ * falls back to channel-id prefixes (D=im, G/C may be private/public/mpim).
+ */
+fn __agent_channel_kind(channel_type, channel_id) {
+  let declared = to_string(channel_type ?? "")
+  if declared == "im" {
+    return "im"
+  }
+  if declared == "mpim" {
+    return "mpim"
+  }
+  if declared == "group" || declared == "private_channel" {
+    return "private"
+  }
+  if declared == "channel" || declared == "public_channel" {
+    return "public"
+  }
+  let id = to_string(channel_id ?? "")
+  if starts_with(id, "D") {
+    return "im"
+  }
+  if starts_with(id, "G") {
+    return "private"
+  }
+  return "public"
+}
+
+/**
+ * Build the canonical `agent_summon` dispatch envelope shared by harn-cloud
+ * (Slack dispatch) and burin-code (local Socket Mode). All summon-capable
+ * triggers — `app_mention`, DM/group-DM `message`, and `slash_command` —
+ * normalize into this one shape. See the README for the contract.
+ */
+fn __agent_summon(normalized, source, trigger_kind) {
+  let channel_id = to_string(normalized?.channel ?? "")
+  let channel_kind = __agent_channel_kind(normalized?.channel_type, channel_id)
+  let visibility = if channel_kind == "im" || channel_kind == "mpim" || channel_kind == "private" {
+    "private"
+  } else {
+    "public"
+  }
+  return {
+    prompt: to_string(normalized?.text ?? ""),
+    channel_id: channel_id,
+    channel_kind: channel_kind,
+    thread_ts: normalized?.thread_ts ?? normalized?.message_ts,
+    user: normalized?.user?.id,
+    team: source?.team_id,
+    visibility: visibility,
+    trigger_kind: trigger_kind,
+  }
+}
+
+/**
+ * Decide whether an event_type/channel pairing is a summon and, if so, the
+ * canonical trigger_kind. Returns nil for non-summon events.
+ */
+fn __agent_summon_trigger_kind(event_type, channel_type, channel_id) {
+  if event_type == "app_mention" {
+    return "app_mention"
+  }
+  if event_type == "message" {
+    let kind = __agent_channel_kind(channel_type, channel_id)
+    if kind == "im" {
+      return "message.im"
+    }
+    if kind == "mpim" {
+      return "message.mpim"
+    }
+  }
+  return nil
 }
 
 fn __dedupe_key(payload, event_type, resource_id) {
@@ -970,8 +1325,13 @@ fn __payload_with_normalized_fields(payload, normalized, raw = nil, dedupe_key =
   let source = __slack_source(normalized, payload, dedupe_key)
   let source_refs = __slack_source_refs(normalized, source)
   let triage = __slack_triage_source(normalized, source, source_refs, dedupe_key)
-  return base + normalized
+  var result = base + normalized
     + {source: source, source_refs: source_refs, triage: triage, provider_raw: provider_raw}
+  let summon_trigger = __agent_summon_trigger_kind(normalized?.event_type, normalized?.channel_type, normalized?.channel)
+  if summon_trigger != nil {
+    result = result + {agent_summon: __agent_summon(normalized, source, summon_trigger)}
+  }
+  return result
 }
 
 fn __slack_source(normalized, envelope, delivery_dedupe_key) {
@@ -1050,8 +1410,14 @@ fn __slack_source_kind(normalized) {
   if event_type == "app_home_opened" {
     return "app_home"
   }
-  if event_type == "assistant_thread_started" {
+  if event_type == "assistant_thread_started" || event_type == "assistant_thread_context_changed" {
     return "assistant_thread"
+  }
+  if event_type == "slash_command" {
+    return "slash_command"
+  }
+  if event_type == "interactivity" {
+    return "interactivity"
   }
   return event_type
 }
@@ -1283,6 +1649,12 @@ fn __slack_triage_summary(normalized) {
   if normalized?.event_type == "assistant_thread_started" {
     return "Slack assistant thread started"
   }
+  if normalized?.event_type == "assistant_thread_context_changed" {
+    return "Slack assistant thread context changed"
+  }
+  if normalized?.event_type == "slash_command" {
+    return "Slack slash command " + to_string(normalized?.command ?? "")
+  }
   return to_string(normalized?.event_type ?? "Slack event")
 }
 
@@ -1422,6 +1794,66 @@ fn __outbound_config(args) {
     return __err("missing_bot_token", "slack connector requires bot_token")
   }
   return Ok({api_base_url: to_string(api_base_url), bot_token: to_string(bot_token)})
+}
+
+/**
+ * Enforce the secure-default Socket Mode gate. Socket Mode connects only when
+ * (1) it is explicitly enabled via args, binding, or connector ctx, AND (2) an
+ * app-level `xapp-` token is resolvable. Returns Ok(true) when allowed, or an
+ * __err describing why the connector stays on the HTTP Events path.
+ */
+fn __socket_mode_enabled(args) {
+  if !__socket_mode_enable_flag(args) {
+    return __err(
+      "socket_mode_disabled",
+      "Slack Socket Mode is off by default; enable it (args.enable_socket_mode, binding, or ctx socket_mode.enabled) and grant the streaming capability before connecting",
+    )
+  }
+  let token_result = __socket_mode_config(args)
+  if is_err(token_result) {
+    return token_result
+  }
+  let app_token = unwrap(token_result)?.app_token
+  if app_token == nil || !starts_with(to_string(app_token), "xapp-") {
+    return __err(
+      "missing_app_token",
+      "Slack Socket Mode requires an app-level `xapp-` token; configure slack/app-token",
+    )
+  }
+  return Ok(true)
+}
+
+/**
+ * Read the Socket Mode enable flag from the most-trusted source available:
+ * explicit args first, then the matched binding, then connector ctx.
+ */
+fn __socket_mode_enable_flag(args) {
+  let from_args = args?.enable_socket_mode ?? args?.socket_mode?.enabled ?? args?.enable
+  if from_args != nil {
+    return __is_true(from_args)
+  }
+  let state = __state()
+  let bindings = state.bindings ?? {}
+  let binding_id = args?.binding_id ?? args?.metadata?.binding_id
+  if binding_id != nil {
+    let binding = bindings.get(binding_id)
+    let from_binding = binding?.enable_socket_mode ?? binding?.socket_mode?.enabled
+      ?? binding?.config?.enable_socket_mode
+      ?? binding?.config?.socket_mode?.enabled
+    if from_binding != nil {
+      return __is_true(from_binding)
+    }
+  }
+  let from_ctx = state.ctx?.enable_socket_mode ?? state.ctx?.socket_mode?.enabled
+  return __is_true(from_ctx)
+}
+
+/** Strict boolean-true check: only the literal `true` enables a guarded path. */
+fn __is_true(value) {
+  match value {
+    true -> { return true }
+    _ -> { return false }
+  }
 }
 
 fn __socket_mode_config(args) {

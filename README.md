@@ -55,6 +55,21 @@ trigger respond on slack {
 
 ## Socket Mode usage
 
+> **Socket Mode is OFF by default.** The connector's default delivery path is
+> the HTTP Events API. `socket_mode_connect(...)` refuses to open a WebSocket
+> unless Socket Mode is **explicitly enabled** *and* an app-level `xapp-` token
+> is present. This keeps the secure default (no outbound WebSocket, no
+> long-lived connection) unless an operator opts in. `normalize_inbound(...)`
+> never opens a socket — the WebSocket is only ever opened from the
+> outbound/activation path (`socket_mode_connect`).
+>
+> Enable it by passing `enable_socket_mode: true` to `socket_mode_connect`, or
+> by setting `socket_mode.enabled = true` (or `enable_socket_mode = true`) on
+> the connector binding or `init` ctx. Socket Mode requires the `streaming`
+> capability (declared in `harn.toml`). Without both the enable flag and a
+> valid `xapp-` token, `socket_mode_connect` returns an `Err` (`code:
+> socket_mode_disabled` or `missing_app_token`) and opens nothing.
+
 Socket Mode uses a Slack app-level token (`xapp-...`) to open the WebSocket and
 the same normalization path as Events API for the inner payload.
 
@@ -63,6 +78,8 @@ import { call, socket_mode_connect, socket_mode_receive } from "harn-slack-conne
 
 pipeline socket_mode_worker() {
   let conn = socket_mode_connect({
+    // Socket Mode is opt-in: set the enable flag and provide an xapp- token.
+    enable_socket_mode: true,
     app_token: env("SLACK_APP_TOKEN"),
     max_messages: 1000,
   })
@@ -109,7 +126,12 @@ Required bot scopes depend on outbound calls and subscribed events:
 - `channels:history`, `groups:history`, `im:history`, or `mpim:history` for
   message events in those surfaces.
 - `reactions:read` for `reaction_added`.
-- `chat:write` for `chat.postMessage`, `chat.update`, and `chat.delete`.
+- `chat:write` for `chat.postMessage`, `chat.postEphemeral`, `chat.update`,
+  and `chat.delete`.
+- `assistant:write` for `assistant.threads.setStatus`,
+  `assistant.threads.setSuggestedPrompts`, and `assistant.threads.setTitle`.
+- `commands` (slash-command subscription) and interactivity enabled in the app
+  config for `slash_command` and `interactivity` inbound POSTs.
 - `reactions:write` for `reactions.add` and `reactions.remove`.
 - `views.open` and `views.update` use the app's interactivity `trigger_id` or
   view identifiers rather than an additional method-specific OAuth scope.
@@ -157,7 +179,20 @@ Supported Events API and Socket Mode event types:
 - `app_mention`
 - `reaction_added`
 - `app_home_opened`
-- `assistant_thread_started`
+- `assistant_thread_started` (carries its `payload.context`)
+- `assistant_thread_context_changed` (carries its `payload.context`)
+
+Plus two non-Events-API inbound shapes delivered to the same
+`normalize_inbound(...)` entry point as signed
+`application/x-www-form-urlencoded` POSTs (verified with the same signing
+secret HMAC + replay window as the Events API path):
+
+- `slash_command` — a Slack slash-command POST (`command`, `text`, `user_id`,
+  `channel_id`, `response_url`, `trigger_id`, `team_id`). Normalized to
+  `event.kind == "slash_command"`.
+- `interactivity` — a `payload=<json>` POST (block actions, view submissions).
+  Normalized to `event.kind == "interactivity"` with `interaction_type`,
+  `action_id`, `callback_id`, `trigger_id`, `response_url`, `view`, `actions`.
 
 Slack retry headers are normalized onto `event.payload.retry`:
 
@@ -193,6 +228,59 @@ permalinks should be hydrated later with `call("chat.getPermalink", ...)` using
 the supplied `payload.source.permalink_request`; write-capable outbound methods
 are marked `requires_approval` in `outbound_methods()` and in triage action
 intents so upstream hosts can gate them.
+
+## The `agent_summon` dispatch contract
+
+Every way a user can "summon" the agent normalizes into one canonical
+`payload.agent_summon` envelope. This is the single shape that harn-cloud (Slack
+dispatch) and burin-code (local Socket Mode) both dispatch from, so downstream
+hosts do not branch on the Slack surface. It is attached to:
+
+- `app_mention` events → `trigger_kind: "app_mention"`
+- DM `message` events (`channel_type == "im"`) → `trigger_kind: "message.im"`
+- group-DM `message` events (`channel_type == "mpim"`) →
+  `trigger_kind: "message.mpim"`
+- `slash_command` POSTs → `trigger_kind: "slash_command"`
+
+Plain public/private channel messages and `interactivity`/`reaction` events do
+**not** carry an `agent_summon` (they are not summons), so the field's presence
+is itself the dispatch signal.
+
+The envelope shape:
+
+```harn
+{
+  prompt: "<message or slash text>",
+  channel_id: "C123",
+  channel_kind: "public",   // public | private | im | mpim
+  thread_ts: "1713650000.000100",  // thread root or message ts
+  user: "U123",
+  team: "T123",
+  visibility: "public",     // "private" for im/mpim/private, else "public"
+  trigger_kind: "app_mention",  // app_mention | message.im | message.mpim | slash_command
+}
+```
+
+## Reply helpers
+
+- `chat.postMessage` — post into a channel or thread (pass `thread_ts` to
+  thread the reply). Requires `chat:write`.
+- `chat.postEphemeral` — post a message visible only to one `user` in a
+  channel. Requires `chat:write`.
+
+## Agents & Assistants methods
+
+For DM-style agent chat (the Slack "Agents & Assistants" surface), the
+connector exposes:
+
+- `assistant.threads.setStatus` — show an "is thinking…" style status on the
+  assistant thread.
+- `assistant.threads.setSuggestedPrompts` — offer suggested prompts.
+- `assistant.threads.setTitle` — set the assistant thread title.
+
+All three require the `assistant:write` bot scope. They are listed in
+`outbound_methods()` as approval-gated (`requires_approval: true`) bot-token
+methods.
 
 ## Operations
 
