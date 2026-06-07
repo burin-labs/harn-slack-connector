@@ -53,6 +53,30 @@ trigger respond on slack {
 }
 ```
 
+Eval-suite notifiers can format an upstream verdict and post it through the
+same approved `chat.postMessage` path:
+
+```harn
+import { post_eval_verdict } from "harn-slack-connector/default"
+
+post_eval_verdict(
+  {
+    suite: "nightly-regression",
+    model: "mock-model",
+    split: "holdout",
+    decision: "regression",
+    macro_pass_at_1: 0.42,
+    baseline_macro_pass_at_1: 0.54,
+    gate: {status: "regression", threshold: 0.49},
+    paired_delta: {mean_delta: -0.12, ci_lo: -0.16, ci_hi: -0.08},
+    reliability: {all_pass: 0.35, flaky: 0.15, all_fail: 0.50},
+    top_regressed_cases: [{name: "tool-call-schema", fingerprint: "fp-tool-call-schema", delta: -1.0}],
+    ledger_url: "https://harn.example/evals/nightly-regression",
+  },
+  {channel: "C111", bot_token: env("SLACK_BOT_TOKEN")},
+)
+```
+
 ## Socket Mode usage
 
 > **Socket Mode is OFF by default.** The connector's default delivery path is

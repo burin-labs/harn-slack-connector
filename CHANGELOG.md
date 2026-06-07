@@ -7,6 +7,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Eval verdict Slack digest helper.** `post_eval_verdict(...)` formats an
+  upstream eval-suite verdict and sends it through the existing approved
+  `chat.postMessage` Web API path.
 - **Slash-command and interactivity normalization.** `normalize_inbound`
   now accepts signed `application/x-www-form-urlencoded` POSTs and normalizes
   them into `slash_command` and `interactivity` (block actions / view
