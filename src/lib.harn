@@ -450,6 +450,54 @@ pub fn call(method, args = {}) {
   return payload
 }
 
+/**
+ * Build a Slack `chat.postMessage` payload for an upstream eval verdict.
+ *
+ * The verdict is already computed by Harn's eval stats module; this helper only
+ * formats the digest and carries caller-supplied Slack options through to
+ * `chat.postMessage`.
+ */
+pub fn eval_verdict_post_message_payload(verdict, options = nil) {
+  let opts = options ?? {}
+  let channel = opts?.channel ?? verdict?.channel
+  if channel == nil || trim(to_string(channel)) == "" {
+    return __err("missing_channel", "eval verdict Slack digest requires channel")
+  }
+  let title = __eval_verdict_title(verdict)
+  let summary = __eval_verdict_summary(verdict)
+  var payload = opts
+    + {
+    channel: channel,
+    text: title + "\n" + summary,
+    blocks: [
+      {type: "section", text: {type: "mrkdwn", text: "*" + title + "*\n" + summary}},
+      {type: "section", fields: __eval_verdict_fields(verdict)},
+    ],
+  }
+  let cases = __eval_verdict_case_lines(verdict?.top_regressed_cases ?? verdict?.regressed_cases ?? [], 5)
+  if cases != "" {
+    payload.blocks = payload.blocks
+      .push({type: "section", text: {type: "mrkdwn", text: "*Top regressed cases*\n" + cases}})
+  }
+  let link = verdict?.dashboard_url ?? verdict?.ledger_url ?? verdict?.run_url
+  if link != nil && trim(to_string(link)) != "" {
+    payload.blocks = payload.blocks
+      .push(
+      {type: "context", elements: [{type: "mrkdwn", text: "<" + to_string(link) + "|Open eval ledger>"}]},
+    )
+  }
+  return payload
+}
+
+/** Format and post an upstream eval verdict through `chat.postMessage`. */
+pub fn post_eval_verdict(verdict, options = nil) {
+  let payload = eval_verdict_post_message_payload(verdict, options)
+  if is_err(payload) {
+    return payload
+  }
+  return call("chat.postMessage", unwrap(payload))
+}
+
 fn __state() {
   return SLACK_STATE
 }
@@ -607,17 +655,17 @@ fn __signing_secret(raw) {
   let state = __state()
   let ctx_secret = __first_secret_value(
     [
-      state?.ctx?.signing_secret,
-      state?.ctx?.webhook_secret,
-      state?.ctx?.secrets?.signing_secret,
-      state?.ctx?.secrets?.webhook_secret,
+      state.ctx?.signing_secret,
+      state.ctx?.webhook_secret,
+      state.ctx?.secrets?.signing_secret,
+      state.ctx?.secrets?.webhook_secret,
     ],
     nil,
   )
   if ctx_secret != nil && trim(to_string(ctx_secret)) != "" {
     return to_string(ctx_secret)
   }
-  let bindings = state?.bindings ?? {}
+  let bindings = state.bindings ?? {}
   let binding_id = raw?.metadata?.binding_id ?? raw?.binding_id
   if binding_id != nil {
     let binding_secret = __binding_signing_secret(bindings.get(binding_id))
@@ -686,7 +734,7 @@ fn __signing_secret_id(raw) {
   if direct_id != nil {
     return direct_id
   }
-  let bindings = __state()?.bindings ?? {}
+  let bindings = __state().bindings ?? {}
   let binding_id = metadata?.binding_id ?? raw?.binding_id
   if binding_id != nil {
     return __binding_signing_secret_id(bindings.get(binding_id))
@@ -778,7 +826,7 @@ fn __include_bot_messages(raw) {
   // raw envelope. The binding-id lookup is the only raw-derived hop, and only
   // selects a trusted binding entry.
   let state = __state()
-  let bindings = state?.bindings ?? {}
+  let bindings = state.bindings ?? {}
   let binding_id = raw?.metadata?.binding_id ?? raw?.binding_id
   if binding_id != nil {
     let binding = bindings.get(binding_id)
@@ -787,7 +835,7 @@ fn __include_bot_messages(raw) {
       return from_binding
     }
   }
-  return state?.ctx?.include_bot_messages ?? false
+  return state.ctx?.include_bot_messages ?? false
 }
 
 fn __verify_slack_signature(raw, headers, body_text) {
@@ -1668,6 +1716,144 @@ fn __slack_mentions(text) {
     users = users.push(to_string(token).replace("<@", "").replace(">", ""))
   }
   return users
+}
+
+fn __eval_verdict_title(verdict) {
+  let suite = to_string(verdict?.suite ?? verdict?.suite_id ?? "eval suite")
+  let decision = __eval_verdict_decision(verdict)
+  if decision == "regression" {
+    return "Eval regression detected: " + suite
+  }
+  if decision == "improved" || decision == "improvement" {
+    return "Eval improvement confirmed: " + suite
+  }
+  return "Eval verdict: " + suite
+}
+
+fn __eval_verdict_summary(verdict) {
+  let paired = verdict?.paired_delta ?? verdict?.paired ?? {}
+  let gate = verdict?.gate ?? {}
+  return "Macro pass@1 "
+    + __format_percent(
+    __first_present([verdict?.macro_pass_at_1, gate?.current_macro, paired?.current_macro]),
+  )
+    + " vs baseline "
+    + __format_percent(
+    __first_present([verdict?.baseline_macro_pass_at_1, gate?.baseline_macro, paired?.baseline_macro]),
+  )
+    + "; paired delta "
+    + __format_delta(__first_present([paired?.mean_delta, verdict?.paired_delta_mean]))
+    + " (95% CI "
+    + __format_delta(__first_present([paired?.ci_lo, verdict?.paired_delta_ci_lo]))
+    + " to "
+    + __format_delta(__first_present([paired?.ci_hi, verdict?.paired_delta_ci_hi]))
+    + "); gate "
+    + __eval_verdict_decision(verdict)
+    + "."
+}
+
+fn __eval_verdict_fields(verdict) {
+  let gate = verdict?.gate ?? {}
+  let paired = verdict?.paired_delta ?? verdict?.paired ?? {}
+  let reliability = verdict?.reliability ?? {}
+  return [
+    {type: "mrkdwn", text: "*Model*\n" + to_string(verdict?.model ?? "unknown")},
+    {type: "mrkdwn", text: "*Split*\n" + to_string(verdict?.split ?? "default")},
+    {
+      type: "mrkdwn",
+      text: "*Macro pass@1*\n"
+        + __format_percent(
+        __first_present([verdict?.macro_pass_at_1, gate?.current_macro, paired?.current_macro]),
+      ),
+    },
+    {
+      type: "mrkdwn",
+      text: "*Gate threshold*\n"
+        + __format_percent(__first_present([gate?.threshold, paired?.regression_threshold])),
+    },
+    {
+      type: "mrkdwn",
+      text: "*Paired delta*\n"
+        + __format_delta(__first_present([paired?.mean_delta, verdict?.paired_delta_mean]))
+        + " ["
+        + __format_delta(__first_present([paired?.ci_lo, verdict?.paired_delta_ci_lo]))
+        + ", "
+        + __format_delta(__first_present([paired?.ci_hi, verdict?.paired_delta_ci_hi]))
+        + "]",
+    },
+    {
+      type: "mrkdwn",
+      text: "*Reliability*\nall-pass " + __format_percent(reliability?.all_pass)
+        + ", flaky "
+        + __format_percent(reliability?.flaky)
+        + ", all-fail "
+        + __format_percent(reliability?.all_fail),
+    },
+  ]
+}
+
+fn __eval_verdict_decision(verdict) {
+  let explicit = verdict?.decision ?? verdict?.status
+  if explicit != nil && trim(to_string(explicit)) != "" {
+    return lowercase(to_string(explicit))
+  }
+  let gate = verdict?.gate ?? {}
+  if gate?.status != nil && trim(to_string(gate.status)) != "" {
+    return lowercase(to_string(gate.status))
+  }
+  let paired = verdict?.paired_delta ?? verdict?.paired ?? {}
+  if paired?.status != nil && trim(to_string(paired.status)) != "" {
+    return lowercase(to_string(paired.status))
+  }
+  if !(gate?.passed ?? true) || paired?.regression ?? false {
+    return "regression"
+  }
+  if paired?.improved ?? false {
+    return "improved"
+  }
+  return "inconclusive"
+}
+
+fn __eval_verdict_case_lines(cases, limit) {
+  var lines = ""
+  var count = 0
+  for case in cases ?? [] {
+    if count < limit {
+      let label = to_string(case?.name ?? case?.case ?? case?.id ?? "case")
+      let fingerprint = to_string(case?.fingerprint ?? case?.case_fingerprint ?? case?.current_fingerprint ?? "unknown")
+      let delta = __format_delta(case?.delta ?? case?.pass_delta ?? case?.paired_delta)
+      lines = lines + "- `" + label + "` " + delta + " (`" + fingerprint + "`)\n"
+      count = count + 1
+    }
+  }
+  return trim(lines)
+}
+
+fn __first_present(values) {
+  for value in values ?? [] {
+    if value != nil {
+      return value
+    }
+  }
+  return nil
+}
+
+fn __format_percent(value) {
+  if value == nil {
+    return "n/a"
+  }
+  return to_string(round(value * 1000.0) / 10.0) + "%"
+}
+
+fn __format_delta(value) {
+  if value == nil {
+    return "n/a"
+  }
+  let pct = round(value * 10000.0) / 100.0
+  if pct > 0.0 {
+    return "+" + to_string(pct) + " pp"
+  }
+  return to_string(pct) + " pp"
 }
 
 fn __slack_source_key(source_kind, team_id, channel, message_ts, normalized) {

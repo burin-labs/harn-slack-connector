@@ -46,7 +46,7 @@ pipeline test_socket_mode_smoke(harness) {
     shutdown()
     return
   }
-  let conn = conn_result
+  let conn = unwrap(conn_result)
   assert_eq(conn.transport, "socket_mode", "socket mode transport")
   let result = socket_mode_receive(conn, {timeout_ms: 0})
   assert_eq(result.type, "event", "socket mode event result")

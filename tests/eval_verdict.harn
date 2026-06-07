@@ -1,0 +1,59 @@
+import { eval_verdict_post_message_payload, post_eval_verdict } from "../src/lib"
+
+pipeline test_eval_verdict_post_message_payload(task) {
+  let verdict = sample_verdict()
+  let payload = eval_verdict_post_message_payload(verdict, {channel: "C111", thread_ts: "1713650000.000100"})
+  assert(!is_err(payload), "payload formats")
+  assert_eq(payload.channel, "C111", "channel is carried")
+  assert_eq(payload.thread_ts, "1713650000.000100", "thread ts is carried")
+  assert(contains(payload.text, "Eval regression detected"), "text includes verdict")
+  assert(contains(payload.text, "42.0%"), "text includes current macro")
+  assert(contains(payload.text, "-12.0 pp"), "text includes paired delta")
+  assert_eq(len(payload.blocks), 4, "payload has summary, fields, cases, and link blocks")
+  let missing_channel = eval_verdict_post_message_payload(verdict)
+  assert(is_err(missing_channel), "channel is required")
+  assert_eq(unwrap_err(missing_channel).code, "missing_channel", "missing channel code")
+}
+
+pipeline test_post_eval_verdict_smoke(task) {
+  egress_policy({allow: ["api.slack.com"], default: "deny"})
+  http_mock_clear()
+  let base = "https://api.slack.com"
+  http_mock(
+    "POST",
+    base + "/chat.postMessage",
+    {status: 200, body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000100\"}", headers: {}},
+  )
+  let posted = post_eval_verdict(
+    sample_verdict(),
+    {api_base_url: base, bot_token: "xoxb-test-token", channel: "C111"},
+  )
+  assert_eq(posted.ok, true, "post succeeds")
+  let calls = http_mock_calls()
+  assert_eq(len(calls), 1, "one Slack Web API call")
+  assert_eq(calls[0].url, base + "/chat.postMessage", "postMessage URL")
+  let body = json_parse(calls[0].body)
+  assert_eq(body.channel, "C111", "channel posted")
+  assert(contains(body.text, "Eval regression detected"), "formatted digest posted")
+  assert(contains(body.blocks[1].fields[4].text, "[-16.0 pp, -8.0 pp]"), "paired CI posted")
+  assert(body.bot_token == nil, "bot token is stripped before Slack body")
+}
+
+fn sample_verdict() {
+  return {
+    suite: "nightly-regression",
+    model: "mock-model",
+    split: "holdout",
+    decision: "regression",
+    macro_pass_at_1: 0.42,
+    baseline_macro_pass_at_1: 0.54,
+    gate: {status: "regression", baseline_macro: 0.54, current_macro: 0.42, threshold: 0.49},
+    paired_delta: {mean_delta: -0.12, ci_lo: -0.16, ci_hi: -0.08, n_cases: 16},
+    reliability: {all_pass: 0.35, flaky: 0.15, all_fail: 0.5},
+    top_regressed_cases: [
+      {name: "tool-call-schema", fingerprint: "fp-tool-call-schema", delta: -1.0},
+      {name: "json-repair", fingerprint: "fp-json-repair", delta: -0.5},
+    ],
+    ledger_url: "https://harn.example/evals/nightly-regression",
+  }
+}
