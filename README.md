@@ -152,6 +152,9 @@ Required bot scopes depend on outbound calls and subscribed events:
 - `reactions:read` for `reaction_added`.
 - `chat:write` for `chat.postMessage`, `chat.postEphemeral`, `chat.update`,
   and `chat.delete`.
+- Optional `chat:write.customize` for consent-bound `chat.postMessage`
+  username/avatar customization. Without this scope, Harn disclosure metadata
+  is rendered as a textual byline under the Slack app identity.
 - `assistant:write` for `assistant.threads.setStatus`,
   `assistant.threads.setSuggestedPrompts`, and `assistant.threads.setTitle`.
 - `commands` (slash-command subscription) and interactivity enabled in the app
@@ -291,6 +294,13 @@ The envelope shape:
   thread the reply). Requires `chat:write`.
 - `chat.postEphemeral` — post a message visible only to one `user` in a
   channel. Requires `chat:write`.
+
+When callers pass Harn disclosure metadata under
+`_harn.disclosure.slack`, `chat.postMessage` preserves a machine-readable
+`harn.ai_disclosure` marker in Slack message metadata. If the granted scopes
+include `chat:write.customize`, the connector may set the configured
+`username`, `icon_url`, or `icon_emoji`; otherwise it strips custom identity
+fields and prepends the disclosure byline to the message text.
 
 ## Agents & Assistants methods
 

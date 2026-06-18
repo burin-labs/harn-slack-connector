@@ -84,6 +84,81 @@ pipeline test_call_smoke(task) {
   assert_eq(modal_body.view.type, "modal", "modal view body")
   assert_eq(calls[12].url, base + "/apps.connections.open", "apps.connections.open URL")
   assert(socket_body.app_token_secret == nil, "app token secret id is not sent")
+  let disclosure = {
+    byline: "AI-assisted by Merge Captain for Kenneth Sinder.",
+    customize: {username: "Merge Captain", icon_emoji: ":robot_face:"},
+    ai_mark: {
+      enabled: true,
+      event_type: "harn.ai_disclosure.v1",
+      event_payload: {kind: "ai_generated", generator: "harn", surface: "slack"},
+    },
+  }
+  http_mock_clear()
+  http_mock(
+    "POST",
+    base + "/chat.postMessage",
+    {status: 200, body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000100\"}", headers: {}},
+  )
+  call(
+    "chat.postMessage",
+    {
+      api_base_url: base,
+      bot_token: token,
+      channel: "C111",
+      text: "ready",
+      username: "Should Not Ship",
+      icon_emoji: ":x:",
+      _harn: {disclosure: {slack: disclosure}},
+    },
+  )
+  let fallback_body = json_parse(http_mock_calls({include_sensitive: true})[0].body)
+  assert(fallback_body.username == nil, "custom username is stripped without chat:write.customize")
+  assert(fallback_body.icon_emoji == nil, "custom icon is stripped without chat:write.customize")
+  assert(
+    starts_with(fallback_body.text, "AI-assisted by Merge Captain for Kenneth Sinder.\n\n"),
+    "fallback text byline is prepended",
+  )
+  assert_eq(
+    fallback_body.metadata.event_payload.harn.ai_disclosure.kind,
+    "ai_generated",
+    "AI marker is attached as Slack metadata",
+  )
+  http_mock_clear()
+  http_mock(
+    "POST",
+    base + "/chat.postMessage",
+    {status: 200, body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000101\"}", headers: {}},
+  )
+  call(
+    "chat.postMessage",
+    {
+      api_base_url: base,
+      bot_token: token,
+      channel: "C111",
+      text: "ready",
+      granted_scopes: ["chat:write", "chat:write.customize"],
+      _harn: {disclosure: {slack: disclosure}},
+    },
+  )
+  let custom_body = json_parse(http_mock_calls({include_sensitive: true})[0].body)
+  assert_eq(custom_body.text, "ready", "customized messages keep caller text")
+  assert_eq(custom_body.username, "Merge Captain", "custom username is sent with granted scope")
+  assert_eq(custom_body.icon_emoji, ":robot_face:", "custom icon is sent with granted scope")
+  assert_eq(
+    custom_body.metadata.event_payload.harn.ai_disclosure.surface,
+    "slack",
+    "customized messages keep AI metadata",
+  )
+  http_mock_clear()
+  http_mock(
+    "POST",
+    base + "/chat.postMessage",
+    {status: 200, body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000102\"}", headers: {}},
+  )
+  let alias_posted = call("post_message", {api_base_url: base, bot_token: token, channel: "C111", text: "alias"})
+  let alias_call = http_mock_calls({include_sensitive: true})[0]
+  assert_eq(alias_posted.ok, true, "friendly post_message alias succeeds")
+  assert_eq(alias_call.url, base + "/chat.postMessage", "friendly alias uses chat.postMessage")
   http_mock_clear()
   http_mock(
     "POST",
