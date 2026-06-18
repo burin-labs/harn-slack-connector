@@ -7,6 +7,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Actor-chain disclosure for Slack replies.** `chat.postMessage` now consumes
+  Harn disclosure metadata, adds a textual byline when `chat:write.customize`
+  is absent, uses Slack username/avatar customization only when that scope is
+  known granted, and emits the default machine-readable AI marker through Slack
+  message metadata.
 - **Eval verdict Slack digest helper.** `post_eval_verdict(...)` formats an
   upstream eval-suite verdict and sends it through the existing approved
   `chat.postMessage` Web API path.

@@ -13,6 +13,8 @@ let SLACK_SIGNATURE_WINDOW_SECONDS = 300
 
 let SLACK_REDACTED_HEADER_VALUE = "[redacted]"
 
+let SLACK_CUSTOMIZE_SCOPE = "chat:write.customize"
+
 let SLACK_OUTBOUND_METHOD_POLICIES = [
   {
     method: "apps.connections.open",
@@ -371,12 +373,13 @@ pub fn socket_mode_ack(connection, envelope_id, payload = nil) {
 @complexity(allow)
 /** Dispatch a supported Slack Web API method with JSON body semantics. */
 pub fn call(method, args = {}) {
-  let method_policy = __outbound_method_policy(method)
+  let slack_method = __canonical_outbound_method(method)
+  let method_policy = __outbound_method_policy(slack_method)
   if method_policy == nil {
     return __err("method_not_found", "slack connector does not implement outbound method `" + method + "`")
   }
   var cfg = nil
-  if method == "apps.connections.open" {
+  if slack_method == "apps.connections.open" {
     let config = __socket_mode_config(args ?? {})
     if is_err(config) {
       return config
@@ -411,16 +414,27 @@ pub fn call(method, args = {}) {
       "webhook_secret_secret",
       "secret_id",
       "include_bot_messages",
+      "_harn",
+      "harn",
+      "disclosure",
+      "slack_disclosure",
+      "actor_chain",
+      "disclosure_options",
+      "granted_scopes",
+      "oauth_scopes",
+      "token_scopes",
+      "scopes",
     ],
   )
-  if method == "users.info" && body?.user == nil && body?.user_id != nil {
+  if slack_method == "users.info" && body?.user == nil && body?.user_id != nil {
     body["user"] = body.user_id
     body = body.remove("user_id")
   }
+  body = __apply_slack_outbound_disclosure(slack_method, body, args ?? {})
   let response = try {
     harness.net
       .post(
-      __slack_api_url(cfg.api_base_url, method),
+      __slack_api_url(cfg.api_base_url, slack_method),
       json_stringify(body),
       {
         headers: {Authorization: "Bearer " + cfg.bot_token, "Content-Type": "application/json; charset=utf-8"},
@@ -440,14 +454,193 @@ pub fn call(method, args = {}) {
   let payload = unwrap(decoded)
   if http_response.status < 200 || http_response.status >= 300 {
     if payload?.error != nil {
-      return __slack_api_error(method, payload, http_response.status)
+      return __slack_api_error(slack_method, payload, http_response.status)
     }
     return __err("transport", "Slack API request failed with status " + to_string(http_response.status))
   }
   if !(payload?.ok ?? false) {
-    return __slack_api_error(method, payload, http_response.status)
+    return __slack_api_error(slack_method, payload, http_response.status)
   }
   return payload
+}
+
+fn __canonical_outbound_method(method) {
+  let aliases = {
+    post_message: "chat.postMessage",
+    update_message: "chat.update",
+    add_reaction: "reactions.add",
+    open_view: "views.open",
+    user_info: "users.info",
+  }
+  return aliases.get(method) ?? method
+}
+
+fn __apply_slack_outbound_disclosure(method, body, args) {
+  let disclosure = __slack_message_disclosure(args)
+  var out = __strip_ungranted_slack_custom_identity(method, body, args, disclosure)
+  if disclosure == nil || disclosure?.enabled == false {
+    return out
+  }
+  if __slack_can_customize_identity(method, args, disclosure) {
+    out = __apply_slack_custom_identity(out, disclosure)
+  } else {
+    out = __apply_slack_textual_byline(out, disclosure)
+  }
+  return __apply_slack_ai_mark(out, disclosure)
+}
+
+fn __slack_message_disclosure(args) {
+  return args?._harn?.disclosure?.slack
+    ?? args?._harn?.slack_disclosure
+    ?? args?.disclosure?.slack
+    ?? args?.slack_disclosure
+}
+
+fn __strip_ungranted_slack_custom_identity(method, body, args, disclosure) {
+  if method != "chat.postMessage" || __slack_customize_scope_granted(args, disclosure) {
+    return body
+  }
+  return body.remove("username").remove("icon_url").remove("icon_emoji")
+}
+
+fn __slack_can_customize_identity(method, args, disclosure) {
+  return method == "chat.postMessage"
+    && disclosure?.customize?.enabled != false
+    && __slack_customize_scope_granted(args, disclosure)
+}
+
+fn __slack_customize_scope_granted(args, disclosure) {
+  return __has_scope(__slack_scope_candidates(args, disclosure), SLACK_CUSTOMIZE_SCOPE)
+}
+
+fn __slack_scope_candidates(args, disclosure) {
+  return [
+    disclosure?.customize?.granted_scopes,
+    disclosure?.granted_scopes,
+    args?.granted_scopes,
+    args?.oauth_scopes,
+    args?.token_scopes,
+    args?.scopes,
+    args?.config?.granted_scopes,
+    args?.config?.oauth_scopes,
+    args?.metadata?.granted_scopes,
+    args?.metadata?.oauth_scopes,
+    __state()?.ctx?.granted_scopes,
+    __state()?.ctx?.oauth_scopes,
+  ]
+}
+
+fn __has_scope(candidates, scope) {
+  let wanted = lowercase(trim(scope))
+  for candidate in candidates ?? [] {
+    if __candidate_has_scope(candidate, wanted) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __candidate_has_scope(candidate, wanted) {
+  if candidate == nil {
+    return false
+  }
+  if type_of(candidate) == "list" {
+    for item in candidate {
+      if lowercase(trim(to_string(item))) == wanted {
+        return true
+      }
+    }
+    return false
+  }
+  let normalized = regex_replace("[,\\s]+", " ", lowercase(trim(to_string(candidate))))
+  return contains(split(normalized, " "), wanted)
+}
+
+fn __apply_slack_custom_identity(body, disclosure) {
+  let customize = disclosure?.customize ?? {}
+  var out = body
+  if customize?.username != nil && trim(to_string(customize.username)) != "" {
+    out["username"] = to_string(customize.username)
+  }
+  if customize?.icon_url != nil && trim(to_string(customize.icon_url)) != "" {
+    out["icon_url"] = to_string(customize.icon_url)
+  }
+  if customize?.icon_emoji != nil && trim(to_string(customize.icon_emoji)) != "" {
+    out["icon_emoji"] = to_string(customize.icon_emoji)
+  }
+  return out
+}
+
+fn __apply_slack_textual_byline(body, disclosure) {
+  let byline = trim(to_string(disclosure?.byline ?? disclosure?.text ?? ""))
+  if byline == "" {
+    return body
+  }
+  var out = __prepend_slack_text(body, byline)
+  if type_of(out?.blocks) == "list" && len(out.blocks) > 0
+    && !__slack_blocks_contain_text(out.blocks, byline) {
+    out["blocks"] = [__slack_byline_block(byline)] + out.blocks
+  }
+  return out
+}
+
+fn __prepend_slack_text(body, byline) {
+  let text = to_string(body?.text ?? "")
+  if trim(text) == "" || __text_contains_line(text, byline) {
+    return body
+  }
+  return body + {text: byline + "\n\n" + text}
+}
+
+fn __text_contains_line(text, line) {
+  let wanted = trim(line)
+  for existing in split(to_string(text), "\n") {
+    if trim(existing) == wanted {
+      return true
+    }
+  }
+  return false
+}
+
+fn __slack_byline_block(byline) {
+  return {type: "context", elements: [{type: "mrkdwn", text: byline}]}
+}
+
+fn __slack_blocks_contain_text(blocks, text) {
+  let wanted = trim(text)
+  for block in blocks ?? [] {
+    if trim(to_string(block?.text?.text ?? "")) == wanted {
+      return true
+    }
+    for element in block?.elements ?? [] {
+      if trim(to_string(element?.text ?? "")) == wanted {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+fn __apply_slack_ai_mark(body, disclosure) {
+  let mark = disclosure?.ai_mark ?? disclosure?.mark ?? {}
+  if mark?.enabled == false {
+    return body
+  }
+  let payload = mark?.event_payload ?? mark?.payload
+  if payload == nil {
+    return body
+  }
+  let event_type = to_string(mark?.event_type ?? "harn.ai_disclosure.v1")
+  var metadata = body?.metadata ?? {}
+  if metadata?.event_type == nil || trim(to_string(metadata.event_type)) == "" {
+    metadata["event_type"] = event_type
+  }
+  var event_payload = metadata?.event_payload ?? {}
+  var harn = event_payload?.harn ?? {}
+  harn["ai_disclosure"] = payload
+  event_payload["harn"] = harn
+  metadata["event_payload"] = event_payload
+  return body + {metadata: metadata}
 }
 
 /**
