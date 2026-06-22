@@ -163,7 +163,7 @@ pub fn activate(bindings = []) {
   var by_id = {}
   var seen_paths = {}
   for binding in bindings ?? [] {
-    let binding_id = binding?.binding_id ?? binding?.id ?? "binding-" + to_string(len(by_id.keys()))
+    let binding_id = (binding?.binding_id ?? binding?.id ?? "binding-") + to_string(len(by_id.keys()))
     let path = binding?.path ?? binding?.match?.path
     if path != nil && path != "" {
       if seen_paths.get(path) {
@@ -1998,7 +1998,7 @@ fn __eval_verdict_decision(verdict) {
   if paired?.status != nil && trim(to_string(paired.status)) != "" {
     return lowercase(to_string(paired.status))
   }
-  if !(gate?.passed ?? true) || paired?.regression ?? false {
+  if !(gate?.passed ?? true) || (paired?.regression ?? false) {
     return "regression"
   }
   if paired?.improved ?? false {
