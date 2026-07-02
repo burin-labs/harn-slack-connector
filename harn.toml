@@ -4,6 +4,7 @@ version = "0.2.0"
 description = "Pure-Harn Slack connector: Events API signatures, URL verification, triage source metadata, Socket Mode, and Web API dispatch."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/burin-labs/harn-slack-connector"
+harn = ">=0.8,<0.9"
 
 [exports]
 default = "src/lib.harn"
