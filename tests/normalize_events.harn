@@ -83,6 +83,7 @@ pipeline test_normalize_events(harness) {
     "U999",
     "white_check_mark",
   )
+  assert_event(harness, "file_shared", "file_shared", "F123", "UFILE", "report.pdf")
   assert_event(
     harness,
     "app_home_opened",

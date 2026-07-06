@@ -1,4 +1,4 @@
-import { call } from "../src/lib"
+import { artifact_export_request, artifact_import_request, call } from "../src/lib"
 
 pipeline test_call_smoke(task) {
   egress_policy({allow: ["api.slack.com"], default: "deny"})
@@ -11,6 +11,11 @@ pipeline test_call_smoke(task) {
     "POST",
     base + "/*",
     {status: 200, body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000100\"}", headers: {}},
+  )
+  http_mock(
+    "GET",
+    base + "/files.info*",
+    {status: 200, body: "{\"ok\":true,\"file\":{\"id\":\"F111\"}}", headers: {}},
   )
   let posted = call("chat.postMessage", {api_base_url: base, bot_token: token, channel: "C111", text: "hello"})
   assert_eq(posted.ok, true, "postMessage ok")
@@ -28,6 +33,7 @@ pipeline test_call_smoke(task) {
       message_ts: "1713650000.000100",
     },
   )
+  call("files.info", {api_base_url: base, bot_token: token, file: "F111"})
   call(
     "chat.update",
     {api_base_url: base, bot_token: token, channel: "C111", ts: "1.1", text: "updated"},
@@ -55,14 +61,14 @@ pipeline test_call_smoke(task) {
     {api_base_url: base, app_token: "xapp-test-token", app_token_secret: "slack/app-token"},
   )
   let calls = http_mock_calls()
-  assert_eq(len(calls), 13, "all required outbound methods dispatched")
+  assert_eq(len(calls), 14, "all required outbound methods dispatched")
   let post_body = json_parse(calls[0].body)
   let permalink_body = json_parse(calls[1].body)
-  let user_info_body = json_parse(calls[6].body)
-  let lookup_body = json_parse(calls[7].body)
-  let reaction_body = json_parse(calls[8].body)
-  let modal_body = json_parse(calls[11].body)
-  let socket_body = json_parse(calls[12].body)
+  let user_info_body = json_parse(calls[7].body)
+  let lookup_body = json_parse(calls[8].body)
+  let reaction_body = json_parse(calls[9].body)
+  let modal_body = json_parse(calls[12].body)
+  let socket_body = json_parse(calls[13].body)
   assert_eq(calls[0].method, "POST", "post uses POST")
   assert_eq(calls[0].url, base + "/chat.postMessage", "post URL")
   assert_eq(calls[0].headers.authorization, "[redacted]", "authorization header is redacted")
@@ -73,17 +79,78 @@ pipeline test_call_smoke(task) {
   assert(permalink_body.signing_secret == nil, "webhook signing secret is not sent")
   assert(permalink_body.signing_secret_id == nil, "webhook signing secret id is not sent")
   assert(permalink_body.config == nil, "connector config is not sent")
-  assert_eq(calls[6].url, base + "/users.info", "users.info URL")
+  assert_eq(calls[2].method, "GET", "files.info uses GET")
+  assert_eq(calls[2].url, base + "/files.info?file=F111", "files.info URL")
+  assert_eq(calls[2].headers.authorization, "[redacted]", "files.info auth is redacted")
+  assert_eq(calls[7].url, base + "/users.info", "users.info URL")
   assert_eq(user_info_body.user, "U111", "users.info user_id normalized")
   assert(user_info_body.user_id == nil, "users.info strips user_id alias")
-  assert_eq(calls[7].url, base + "/users.lookupByEmail", "users.lookupByEmail URL")
+  assert_eq(calls[8].url, base + "/users.lookupByEmail", "users.lookupByEmail URL")
   assert_eq(lookup_body.email, "person@example.test", "users.lookupByEmail body")
-  assert_eq(calls[8].url, base + "/reactions.add", "reactions.add URL")
+  assert_eq(calls[9].url, base + "/reactions.add", "reactions.add URL")
   assert_eq(reaction_body.name, "eyes", "reaction name")
-  assert_eq(calls[11].url, base + "/views.update", "views.update URL")
+  assert_eq(calls[12].url, base + "/views.update", "views.update URL")
   assert_eq(modal_body.view.type, "modal", "modal view body")
-  assert_eq(calls[12].url, base + "/apps.connections.open", "apps.connections.open URL")
+  assert_eq(calls[13].url, base + "/apps.connections.open", "apps.connections.open URL")
   assert(socket_body.app_token_secret == nil, "app token secret id is not sent")
+  let export_request = artifact_export_request({api_base_url: base, bot_token: token, file_id: "F111", name: "report.pdf"})
+  assert_eq(export_request.kind, "artifact_export", "artifact export descriptor kind")
+  assert_eq(export_request.method, "GET", "artifact export uses GET")
+  assert_eq(export_request.url, base + "/files.info", "artifact export info URL")
+  assert_eq(export_request.query.file, "F111", "artifact export file query")
+  assert_eq(export_request.steps[1].id, "download_file", "artifact export download step")
+  assert_eq(export_request.artifact.mime_type, "application/pdf", "artifact export MIME")
+  let direct_export = call(
+    "artifact.export_request",
+    {
+      api_base_url: base,
+      bot_token: token,
+      file: {
+        id: "F222",
+        title: "chart.png",
+        url_private_download: "https://files.slack.com/files-pri/T/F222/chart.png",
+      },
+    },
+  )
+  assert_eq(
+    direct_export.url,
+    "https://files.slack.com/files-pri/T/F222/chart.png",
+    "direct file export URL",
+  )
+  assert_eq(direct_export.auth.secret, "slack/bot-token", "direct file export auth secret")
+  let upload_import = artifact_import_request(
+    {
+      api_base_url: base,
+      bot_token: token,
+      filename: "report.pdf",
+      size_bytes: 42,
+      channel_id: "C111",
+      uri: "artifact://session/report.pdf",
+    },
+  )
+  assert_eq(upload_import.kind, "artifact_import", "upload import kind")
+  assert_eq(
+    upload_import.url,
+    base + "/files.getUploadURLExternal",
+    "upload import starts with URL request",
+  )
+  assert_eq(upload_import.steps[1].id, "upload_file", "upload import upload step")
+  assert_eq(upload_import.steps[2].body.channel_id, "C111", "upload import complete channel")
+  let remote_import = call(
+    "artifact.import_request",
+    {
+      api_base_url: base,
+      bot_token: token,
+      mode: "remote_file",
+      external_url: "https://example.com/report.pdf",
+      external_id: "artifact-report",
+      title: "Report",
+      channel_id: "C111",
+    },
+  )
+  assert_eq(remote_import.url, base + "/files.remote.add", "remote import add URL")
+  assert_eq(len(remote_import.steps), 2, "remote import add + share")
+  assert_eq(remote_import.steps[1].id, "files_remote_share", "remote import share step")
   let disclosure = {
     byline: "AI-assisted by Merge Captain for Kenneth Sinder.",
     customize: {username: "Merge Captain", icon_emoji: ":robot_face:"},

@@ -18,7 +18,7 @@ JSON, returns an ack/result, and performs no outbound network work.
 ## Install
 
 ```sh
-harn add github.com/burin-labs/harn-slack-connector@v0.1.0
+harn add @burin/slack-connector@0.2.1
 ```
 
 For local multi-repo development:
@@ -157,6 +157,11 @@ Required bot scopes depend on outbound calls and subscribed events:
   is rendered as a textual byline under the Slack app identity.
 - `assistant:write` for `assistant.threads.setStatus`,
   `assistant.threads.setSuggestedPrompts`, and `assistant.threads.setTitle`.
+- `files:read` for `files.info` and Slack file artifact export descriptors.
+- `files:write` for Slack's external file upload flow
+  (`files.getUploadURLExternal` and `files.completeUploadExternal`).
+- `remote_files:write` for remote file registration and sharing through
+  `files.remote.add` and `files.remote.share`.
 - `commands` (slash-command subscription) and interactivity enabled in the app
   config for `slash_command` and `interactivity` inbound POSTs.
 - `reactions:write` for `reactions.add` and `reactions.remove`.
@@ -182,6 +187,8 @@ oauth_config:
       - app_mentions:read
       - channels:history
       - chat:write
+      - files:read
+      - files:write
       - reactions:read
       - users:read
 settings:
@@ -208,6 +215,8 @@ Supported Events API and Socket Mode event types:
 - `app_home_opened`
 - `assistant_thread_started` (carries its `payload.context`)
 - `assistant_thread_context_changed` (carries its `payload.context`)
+- `file_created`
+- `file_shared`
 
 Plus two non-Events-API inbound shapes delivered to the same
 `normalize_inbound(...)` entry point as signed
@@ -249,6 +258,11 @@ Each normalized event also carries:
   hints, privacy flags, raw-payload provenance, and local/write action intents.
 - `payload.provider_raw`: Slack envelope, raw event, and redacted canonical
   request headers for audit; Slack signatures are never exposed.
+
+File events and file reactions also carry a file source ref with an
+`artifact_export_request` descriptor. Hosts can pass that descriptor to their
+artifact transport layer to hydrate Slack-hosted PDFs, images, and other media
+outside the webhook hot path.
 
 Webhook and Socket Mode normalization remain CPU-only. Exact Slack message
 permalinks should be hydrated later with `call("chat.getPermalink", ...)` using
@@ -301,6 +315,40 @@ When callers pass Harn disclosure metadata under
 include `chat:write.customize`, the connector may set the configured
 `username`, `icon_url`, or `icon_emoji`; otherwise it strips custom identity
 fields and prepends the disclosure byline to the message text.
+
+## File artifact helpers
+
+Slack file work is represented as deterministic descriptors so Harn hosts can
+perform approval, credential binding, byte transfer, rendering, and durable
+artifact storage in one common layer.
+
+```harn
+import { artifact_export_request, artifact_import_request } from "harn-slack-connector/default"
+
+let export_pdf = artifact_export_request({
+  bot_token: env("SLACK_BOT_TOKEN"),
+  file_id: "F123",
+  name: "report.pdf",
+})
+
+let upload_pdf = artifact_import_request({
+  bot_token: env("SLACK_BOT_TOKEN"),
+  filename: "report.pdf",
+  size_bytes: 4242,
+  channel_id: "C111",
+  uri: "artifact://session/report.pdf",
+})
+```
+
+`artifact_export_request(...)` returns either a direct authenticated download
+descriptor when Slack `url_private_download` / `url_private` data is already
+available, or a two-step `files.info` then authenticated download descriptor.
+
+`artifact_import_request(...)` defaults to Slack's current external upload
+flow: request an upload URL with `files.getUploadURLExternal`, upload the bytes
+to that URL, then complete the file with `files.completeUploadExternal`. For
+externally hosted artifacts, pass `mode: "remote_file"` and `external_url` to
+build `files.remote.add` / optional `files.remote.share` steps.
 
 ## Agents & Assistants methods
 

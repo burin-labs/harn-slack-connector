@@ -1,10 +1,10 @@
 [package]
 name = "harn-slack-connector"
-version = "0.2.0"
-description = "Pure-Harn Slack connector: Events API signatures, URL verification, triage source metadata, Socket Mode, and Web API dispatch."
+version = "0.2.1"
+description = "Pure-Harn Slack connector: Events API signatures, triage source metadata, Socket Mode, Web API dispatch, and file artifact helpers."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/burin-labs/harn-slack-connector"
-harn = ">=0.8,<0.9"
+harn = ">=0.9,<0.10"
 
 [exports]
 default = "src/lib.harn"
@@ -19,12 +19,12 @@ connector = { harn = "src/lib.harn" }
 # socket_mode_connect is never reached from normalize_inbound (CPU-only hot
 # path; effect policy denies network there).
 capabilities = ["webhook", "oauth", "streaming"]
-oauth = { resource = "https://slack.com/api/", authorization_endpoint = "https://slack.com/oauth/v2/authorize", token_endpoint = "https://slack.com/api/oauth.v2.access", scopes = "app_mentions:read chat:write", token_endpoint_auth_method = "client_secret_post" }
+oauth = { resource = "https://slack.com/api/", authorization_endpoint = "https://slack.com/oauth/v2/authorize", token_endpoint = "https://slack.com/api/oauth.v2.access", scopes = "app_mentions:read chat:write files:read files:write remote_files:write", token_endpoint_auth_method = "client_secret_post" }
 
 [providers.setup]
 auth_type = "oauth2"
 flow = "browser"
-required_scopes = ["app_mentions:read", "chat:write"]
+required_scopes = ["app_mentions:read", "chat:write", "files:read", "files:write"]
 required_secrets = ["slack/signing-secret", "slack/bot-token", "slack/app-token"]
 setup_command = ["harn", "connect", "slack"]
 validation_command = ["harn", "connect", "status", "--connector", "slack", "--json"]
