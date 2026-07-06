@@ -9,6 +9,8 @@ let SLACK_API_BASE_URL = "https://slack.com/api"
  */
 let SLACK_ALLOWED_API_HOSTS = ["slack.com", "api.slack.com"]
 
+let SLACK_FILE_DOWNLOAD_SECRET = "slack/bot-token"
+
 let SLACK_SIGNATURE_WINDOW_SECONDS = 300
 
 let SLACK_REDACTED_HEADER_VALUE = "[redacted]"
@@ -23,6 +25,21 @@ let SLACK_OUTBOUND_METHOD_POLICIES = [
     token_kind: "app",
   },
   {method: "chat.getPermalink", mutates_provider: false, requires_approval: false, token_kind: "bot"},
+  {method: "files.info", mutates_provider: false, requires_approval: false, token_kind: "bot"},
+  {
+    method: "files.getUploadURLExternal",
+    mutates_provider: true,
+    requires_approval: true,
+    token_kind: "bot",
+  },
+  {
+    method: "files.completeUploadExternal",
+    mutates_provider: true,
+    requires_approval: true,
+    token_kind: "bot",
+  },
+  {method: "files.remote.add", mutates_provider: true, requires_approval: true, token_kind: "bot"},
+  {method: "files.remote.share", mutates_provider: true, requires_approval: true, token_kind: "bot"},
   {method: "chat.postMessage", mutates_provider: true, requires_approval: true, token_kind: "bot"},
   {method: "chat.update", mutates_provider: true, requires_approval: true, token_kind: "bot"},
   {method: "chat.delete", mutates_provider: true, requires_approval: true, token_kind: "bot"},
@@ -64,6 +81,18 @@ let SLACK_OUTBOUND_METHOD_POLICIES = [
   },
   {
     method: "assistant.threads.setTitle",
+    mutates_provider: true,
+    requires_approval: true,
+    token_kind: "bot",
+  },
+  {
+    method: "artifact.export_request",
+    mutates_provider: false,
+    requires_approval: false,
+    token_kind: "bot",
+  },
+  {
+    method: "artifact.import_request",
     mutates_provider: true,
     requires_approval: true,
     token_kind: "bot",
@@ -123,6 +152,8 @@ pub fn payload_schema() {
             "app_home_opened",
             "assistant_thread_started",
             "assistant_thread_context_changed",
+            "file_created",
+            "file_shared",
             "slash_command",
             "interactivity",
           ],
@@ -378,6 +409,12 @@ pub fn call(method, args = {}) {
   if method_policy == nil {
     return __err("method_not_found", "slack connector does not implement outbound method `" + method + "`")
   }
+  if slack_method == "artifact.export_request" {
+    return artifact_export_request(args)
+  }
+  if slack_method == "artifact.import_request" {
+    return artifact_import_request(args)
+  }
   var cfg = nil
   if slack_method == "apps.connections.open" {
     let config = __socket_mode_config(args ?? {})
@@ -431,6 +468,17 @@ pub fn call(method, args = {}) {
     body = body.remove("user_id")
   }
   body = __apply_slack_outbound_disclosure(slack_method, body, args ?? {})
+  if slack_method == "files.info" {
+    let response = try {
+      harness.net
+        .request(
+        "GET",
+        __slack_api_url(cfg.api_base_url, slack_method) + __slack_query(body),
+        {headers: {Authorization: "Bearer " + cfg.bot_token, Accept: "application/json"}},
+      )
+    }
+    return __decode_slack_response(slack_method, response)
+  }
   let response = try {
     harness.net
       .post(
@@ -441,6 +489,211 @@ pub fn call(method, args = {}) {
       },
     )
   }
+  return __decode_slack_response(slack_method, response)
+}
+
+/** Build a deterministic Slack file export descriptor. */
+pub fn artifact_export_request(args = {}) {
+  let cfg = __outbound_config(args ?? {})
+  if is_err(cfg) {
+    return cfg
+  }
+  let slack_cfg = unwrap(cfg)
+  let file = args?.file ?? {}
+  let file_id = args?.file_id ?? file?.id ?? if type_of(file) == "string" {
+    file
+  } else {
+    nil
+  }
+  let direct_url = args?.url_private_download ?? args?.url_private ?? args?.download_url
+    ?? args?.file_url
+    ?? args?.url
+    ?? file?.url_private_download
+    ?? file?.url_private
+  let name = to_string(args?.name ?? args?.filename ?? file?.title ?? file?.name ?? file_id ?? "slack-file")
+  let mime_type = to_string(args?.mime_type ?? args?.content_type ?? file?.mimetype ?? __mime_type_from_name(name))
+  if direct_url != nil && trim(to_string(direct_url)) != "" {
+    return {
+      provider: SLACK_PROVIDER_ID,
+      kind: "artifact_export",
+      method: "GET",
+      url: to_string(direct_url),
+      headers: {Authorization: "Bearer {" + SLACK_FILE_DOWNLOAD_SECRET + "}"},
+      auth: {type: "bearer", secret: SLACK_FILE_DOWNLOAD_SECRET},
+      artifact: {
+        uri: args?.uri ?? ("slack://files/" + url_encode(to_string(file_id ?? name))),
+        name: name,
+        mime_type: mime_type,
+        source_ref: __slack_file_ref(args?.team_id, file_id ?? name),
+      },
+      scopes: ["files:read"],
+    }
+  }
+  if file_id == nil || trim(to_string(file_id)) == "" {
+    return __err("invalid_args", "slack artifact export requires file_id, file.id, or url_private_download")
+  }
+  return {
+    provider: SLACK_PROVIDER_ID,
+    kind: "artifact_export",
+    method: "GET",
+    url: __slack_api_url(slack_cfg.api_base_url, "files.info"),
+    query: {file: file_id},
+    steps: [
+      {
+        id: "files_info",
+        method: "GET",
+        url: __slack_api_url(slack_cfg.api_base_url, "files.info"),
+        query: {file: file_id},
+      },
+      {
+        id: "download_file",
+        method: "GET",
+        url_template: "{file.url_private_download}",
+        headers: {Authorization: "Bearer {" + SLACK_FILE_DOWNLOAD_SECRET + "}"},
+        auth: {type: "bearer", secret: SLACK_FILE_DOWNLOAD_SECRET},
+      },
+    ],
+    artifact: {
+      uri: "slack://files/" + to_string(file_id),
+      name: name,
+      mime_type: mime_type,
+      source_ref: __slack_file_ref(args?.team_id, file_id),
+    },
+    scopes: ["files:read"],
+  }
+}
+
+/**
+ * Build deterministic Slack artifact import descriptors for file upload or remote-file registration.
+ */
+pub fn artifact_import_request(args = {}) {
+  let cfg = __outbound_config(args ?? {})
+  if is_err(cfg) {
+    return cfg
+  }
+  let slack_cfg = unwrap(cfg)
+  let mode = lowercase(to_string(args?.mode ?? args?.import_mode ?? "upload_external"))
+  if mode == "remote_file" || mode == "external_url" {
+    let external_url = args?.external_url ?? args?.url
+    if external_url == nil || trim(to_string(external_url)) == "" {
+      return __err("invalid_args", "slack remote_file artifact import requires external_url or url")
+    }
+    let external_id = args?.external_id ?? args?.id ?? args?.uri ?? external_url
+    let title = args?.title ?? args?.name ?? args?.filename ?? "Imported artifact"
+    var body = {
+      external_id: to_string(external_id),
+      external_url: to_string(external_url),
+      title: to_string(title),
+      filetype: args?.filetype ?? args?.file_type,
+      indexable_file_contents: args?.indexable_file_contents ?? args?.search_text,
+    }
+    var steps = [
+      {
+        id: "files_remote_add",
+        method: "POST",
+        url: __slack_api_url(slack_cfg.api_base_url, "files.remote.add"),
+        body: body,
+      },
+    ]
+    if args?.channel_id != nil || args?.channels != nil {
+      steps = steps
+        + [
+        {
+          id: "files_remote_share",
+          method: "POST",
+          url: __slack_api_url(slack_cfg.api_base_url, "files.remote.share"),
+          body: {
+            external_id: to_string(external_id),
+            channel: args?.channel_id ?? args?.channel,
+            channels: args?.channels,
+          },
+        },
+      ]
+    }
+    return {
+      provider: SLACK_PROVIDER_ID,
+      kind: "artifact_import",
+      method: "POST",
+      url: __slack_api_url(slack_cfg.api_base_url, "files.remote.add"),
+      body: body,
+      steps: steps,
+      media: __artifact_media(args ?? {}, args?.mime_type ?? args?.content_type ?? __mime_type_from_name(title)),
+      scopes: ["remote_files:write"],
+    }
+  }
+  if mode == "upload_external" || mode == "upload" || mode == "file" {
+    let filename = args?.filename ?? args?.name
+    if filename == nil || trim(to_string(filename)) == "" {
+      return __err("invalid_args", "slack upload artifact import requires filename or name")
+    }
+    let length = args?.length ?? args?.size_bytes ?? args?.sizeBytes
+    if length == nil {
+      return __err("invalid_args", "slack upload artifact import requires length or size_bytes")
+    }
+    let title = args?.title ?? args?.name ?? filename
+    let get_body = {
+      filename: to_string(filename),
+      length: length,
+      snippet_type: args?.snippet_type ?? args?.filetype,
+      alt_txt: args?.alt_txt ?? args?.alt_text,
+    }
+    let file_entry = {
+      id: "{file_id}",
+      title: to_string(title),
+      highlight_type: args?.highlight_type ?? args?.snippet_type,
+    }
+    let complete_body = {
+      files: [file_entry],
+      channel_id: args?.channel_id ?? args?.channel,
+      channels: args?.channels,
+      thread_ts: args?.thread_ts,
+      initial_comment: args?.initial_comment ?? args?.comment,
+      blocks: args?.blocks,
+    }
+    return {
+      provider: SLACK_PROVIDER_ID,
+      kind: "artifact_import",
+      method: "POST",
+      url: __slack_api_url(slack_cfg.api_base_url, "files.getUploadURLExternal"),
+      body: get_body,
+      steps: [
+        {
+          id: "get_upload_url",
+          method: "POST",
+          url: __slack_api_url(slack_cfg.api_base_url, "files.getUploadURLExternal"),
+          body: get_body,
+        },
+        {
+          id: "upload_file",
+          method: "POST",
+          url_template: "{upload_url}",
+          upload: {
+            uri: args?.uri ?? args?.path,
+            filename: to_string(filename),
+            content_type: args?.mime_type ?? args?.content_type,
+          },
+        },
+        {
+          id: "complete_upload",
+          method: "POST",
+          url: __slack_api_url(slack_cfg.api_base_url, "files.completeUploadExternal"),
+          body: complete_body,
+        },
+      ],
+      media: __artifact_media(
+        args ?? {},
+        args?.mime_type ?? args?.content_type ?? __mime_type_from_name(filename),
+      ),
+      scopes: ["files:write"],
+    }
+  }
+  return __err(
+    "unsupported_artifact_import_mode",
+    "slack artifact import mode `" + mode + "` is not supported",
+  )
+}
+
+fn __decode_slack_response(method, response) {
   if is_err(response) {
     return __err("transport", to_string(unwrap_err(response)))
   }
@@ -454,12 +707,12 @@ pub fn call(method, args = {}) {
   let payload = unwrap(decoded)
   if http_response.status < 200 || http_response.status >= 300 {
     if payload?.error != nil {
-      return __slack_api_error(slack_method, payload, http_response.status)
+      return __slack_api_error(method, payload, http_response.status)
     }
     return __err("transport", "Slack API request failed with status " + to_string(http_response.status))
   }
   if !(payload?.ok ?? false) {
-    return __slack_api_error(slack_method, payload, http_response.status)
+    return __slack_api_error(method, payload, http_response.status)
   }
   return payload
 }
@@ -471,6 +724,9 @@ fn __canonical_outbound_method(method) {
     add_reaction: "reactions.add",
     open_view: "views.open",
     user_info: "users.info",
+    file_info: "files.info",
+    artifact_export: "artifact.export_request",
+    artifact_import: "artifact.import_request",
   }
   return aliases.get(method) ?? method
 }
@@ -1157,6 +1413,48 @@ fn __normalize_event_callback(payload, raw) {
       __canonical_slack_headers(raw?.headers ?? {}),
     )
   }
+  if event_type == "file_created" || event_type == "file_shared" {
+    let file = if type_of(event?.file) == "dict" {
+      event.file
+    } else {
+      {}
+    }
+    let file_id = event?.file_id ?? file?.id ?? event?.file
+    if file_id == nil || trim(to_string(file_id)) == "" {
+      return __err("missing_file_id", "slack file event missing file_id")
+    }
+    let channel = event?.channel_id ?? event?.channel ?? ""
+    let resource_id = to_string(file_id)
+    let dedupe_key = __dedupe_key(payload, event_type, resource_id)
+    let normalized_payload = __payload_with_normalized_fields(
+      payload,
+      {
+        provider: SLACK_PROVIDER_ID,
+        event_type: event_type,
+        resource_id: resource_id,
+        channel: channel,
+        channel_type: event?.channel_type,
+        message_ts: event?.event_ts,
+        thread_ts: event?.thread_ts,
+        user: {id: event?.user ?? file?.user ?? "", name: event?.user_name ?? event?.username},
+        text: file?.title ?? file?.name ?? "",
+        file_id: file_id,
+        file: file,
+        retry: retry_info,
+        metrics: __slack_metrics(retry_info),
+        occurred_at: event?.event_ts ?? file?.created ?? payload?.event_time,
+        raw: event,
+      },
+      raw,
+      dedupe_key,
+    )
+    return __event_result(
+      event_type,
+      dedupe_key,
+      normalized_payload,
+      __canonical_slack_headers(raw?.headers ?? {}),
+    )
+  }
   if event_type == "app_home_opened" {
     let channel = event?.channel ?? ""
     let ts = event?.event_ts ?? payload?.event_time ?? ""
@@ -1590,8 +1888,11 @@ fn __slack_source(normalized, envelope, delivery_dedupe_key) {
   if source_kind == "app_home" && envelope?.api_app_id != nil {
     deep_link = __slack_app_home_deep_link(team_id, envelope.api_app_id, normalized?.tab)
   }
+  if source_kind == "file" {
+    deep_link = __slack_file_deep_link(team_id, normalized?.file_id)
+  }
   let permalink = event?.permalink ?? event?.url ?? event?.message?.permalink
-  let source_url = permalink ?? channel_url
+  let source_url = permalink ?? event?.file?.permalink ?? event?.file?.url_private ?? channel_url
   return {
     provider: SLACK_PROVIDER_ID,
     kind: source_kind,
@@ -1603,6 +1904,7 @@ fn __slack_source(normalized, envelope, delivery_dedupe_key) {
     app_id: envelope?.api_app_id,
     channel_id: channel,
     channel_type: normalized?.channel_type,
+    file_id: normalized?.file_id,
     message_ts: message_ts,
     thread_ts: thread_ts,
     thread_root_ts: if thread_ts != nil && message_ts != nil && thread_ts != message_ts {
@@ -1619,6 +1921,11 @@ fn __slack_source(normalized, envelope, delivery_dedupe_key) {
     deep_link: deep_link,
     permalink: permalink,
     permalink_request: __slack_permalink_request(channel, message_ts),
+    artifact_export_request: if source_kind == "file" {
+      __slack_file_export_request_ref(team_id, normalized?.file_id, normalized?.file)
+    } else {
+      nil
+    },
     raw_ref: {event_id: envelope?.event_id, event_time: envelope?.event_time},
   }
 }
@@ -1647,6 +1954,9 @@ fn __slack_source_kind(normalized) {
       return "file_reaction"
     }
     return "reaction"
+  }
+  if event_type == "file_created" || event_type == "file_shared" {
+    return "file"
   }
   if event_type == "app_home_opened" {
     return "app_home"
@@ -1710,16 +2020,19 @@ fn __slack_source_refs(normalized, source) {
     refs = refs.push(__slack_member_ref(team_id, normalized.item_user, "item_user"))
   }
   let item = normalized?.raw?.item ?? {}
-  if item?.file != nil && item.file != "" {
+  let file_id = item?.file ?? normalized?.file_id ?? normalized?.raw?.file_id ?? normalized?.raw?.file?.id
+  if file_id != nil && file_id != "" {
     refs = refs
       .push(
       {
         provider: SLACK_PROVIDER_ID,
         kind: "file",
-        id: __slack_ref_id("file", team_id, item.file),
+        id: __slack_ref_id("file", team_id, file_id),
         team_id: team_id,
-        file_id: item.file,
-        deep_link: __slack_file_deep_link(team_id, item.file),
+        file_id: file_id,
+        url: normalized?.raw?.file?.permalink ?? normalized?.raw?.file?.url_private,
+        deep_link: __slack_file_deep_link(team_id, file_id),
+        artifact_export_request: __slack_file_export_request_ref(team_id, file_id, normalized?.raw?.file),
       },
     )
   }
@@ -1830,7 +2143,7 @@ fn __slack_privacy(normalized) {
   if normalized?.channel_type == "im" || starts_with(to_string(normalized?.channel ?? ""), "D") {
     flags = flags.push("direct_message")
   }
-  if normalized?.raw?.item?.file != nil || normalized?.raw?.file != nil {
+  if normalized?.raw?.item?.file != nil || normalized?.raw?.file != nil || normalized?.file_id != nil {
     flags = flags.push("contains_file_ref")
   }
   return {
@@ -2050,6 +2363,9 @@ fn __format_delta(value) {
 }
 
 fn __slack_source_key(source_kind, team_id, channel, message_ts, normalized) {
+  if source_kind == "file" && normalized?.file_id != nil && normalized.file_id != "" {
+    return __slack_ref_id("file", team_id, normalized.file_id)
+  }
   if channel != nil && channel != "" && message_ts != nil && message_ts != "" {
     return __slack_ref_id(source_kind, team_id, channel + ":" + to_string(message_ts))
   }
@@ -2067,6 +2383,10 @@ fn __slack_source_dedupe_key(source_kind, team_id, channel, message_ts, normaliz
       + to_string(normalized?.reaction ?? "")
       + ":"
       + to_string(normalized?.user?.id ?? "")
+  }
+  if source_kind == "file" {
+    return "slack:file:" + team + ":"
+      + to_string(normalized?.file_id ?? normalized?.resource_id ?? "unknown")
   }
   if channel != nil && channel != "" && message_ts != nil && message_ts != "" {
     return "slack:message:" + team + ":" + to_string(channel) + ":" + to_string(message_ts)
@@ -2095,6 +2415,17 @@ fn __slack_member_ref(team_id, user_id, role) {
     team_id: team_id,
     user_id: user_id,
     deep_link: __slack_member_deep_link(team_id, user_id),
+  }
+}
+
+fn __slack_file_ref(team_id, file_id) {
+  return {
+    provider: SLACK_PROVIDER_ID,
+    kind: "file",
+    id: __slack_ref_id("file", team_id, file_id),
+    team_id: team_id,
+    file_id: file_id,
+    deep_link: __slack_file_deep_link(team_id, file_id),
   }
 }
 
@@ -2158,6 +2489,67 @@ fn __slack_permalink_request(channel, message_ts) {
     mutates_provider: false,
     requires_approval: false,
   }
+}
+
+fn __slack_file_export_request_ref(team_id, file_id, file = nil) {
+  return {
+    method: "artifact.export_request",
+    args: {file_id: file_id, team_id: team_id, file: file},
+    mutates_provider: false,
+    requires_approval: false,
+  }
+}
+
+fn __mime_type_from_name(name) {
+  let text = lowercase(to_string(name ?? ""))
+  if text.ends_with(".pdf") {
+    return "application/pdf"
+  }
+  if text.ends_with(".md") || text.ends_with(".markdown") {
+    return "text/markdown"
+  }
+  if text.ends_with(".html") || text.ends_with(".htm") {
+    return "text/html"
+  }
+  if text.ends_with(".json") {
+    return "application/json"
+  }
+  if text.ends_with(".csv") {
+    return "text/csv"
+  }
+  if text.ends_with(".png") {
+    return "image/png"
+  }
+  if text.ends_with(".jpg") || text.ends_with(".jpeg") {
+    return "image/jpeg"
+  }
+  if text.ends_with(".gif") {
+    return "image/gif"
+  }
+  return "application/octet-stream"
+}
+
+fn __artifact_media(args, default_mime_type) {
+  return {
+    uri: args?.uri ?? args?.path,
+    mime_type: args?.mime_type ?? args?.content_type ?? default_mime_type,
+    size_bytes: args?.size_bytes ?? args?.sizeBytes ?? args?.length,
+    sha256: args?.sha256,
+  }
+}
+
+fn __slack_query(fields) {
+  var query = []
+  for key in (fields ?? {}).keys() {
+    let value = fields.get(key)
+    if value != nil {
+      query = query.push({key: key, value: value})
+    }
+  }
+  if len(query) == 0 {
+    return ""
+  }
+  return "?" + query_stringify(query)
 }
 
 fn __outbound_config(args) {

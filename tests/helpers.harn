@@ -65,6 +65,15 @@ pub fn fixture_raw(harness, name, secret, ts, extra = nil) {
   return signed_raw(secret, fixture_body(harness, name), ts, extra)
 }
 
+fn method_policy_by_name(methods, name) {
+  for method in methods {
+    if method.method == name {
+      return method
+    }
+  }
+  return nil
+}
+
 /** Assert the public connector metadata and lifecycle exports stay usable. */
 pub fn assert_slack_interface() {
   shutdown()
@@ -74,8 +83,15 @@ pub fn assert_slack_interface() {
   require payload_schema().json_schema.type == "object", "payload schema json object"
   let methods = outbound_methods()
   require methods[0].method == "apps.connections.open", "method policies are exposed"
-  require methods[2].method == "chat.postMessage", "write method is listed"
-  require methods[2].requires_approval, "write method requires approval"
+  let post_message = method_policy_by_name(methods, "chat.postMessage")
+  require post_message != nil, "write method is listed"
+  require post_message.requires_approval, "write method requires approval"
+  let file_info = method_policy_by_name(methods, "files.info")
+  require file_info != nil, "files.info method is listed"
+  require !file_info.requires_approval, "files.info does not require approval"
+  let artifact_import = method_policy_by_name(methods, "artifact.import_request")
+  require artifact_import != nil, "artifact import method is listed"
+  require artifact_import.requires_approval, "artifact import requires approval"
   let initialized = init({signing_secret: "test-secret", include_bot_messages: false})
   require initialized.initialized, "init stores state"
   let activated = activate([{id: "primary", path: "/slack/events", secrets: {signing_secret: "test-secret"}}])

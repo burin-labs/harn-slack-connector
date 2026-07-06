@@ -3,6 +3,31 @@
 All notable changes to the harn-slack-connector package are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.2.1
+
+### Added
+
+- **Slack file artifact helpers.** `artifact_export_request(...)` returns a
+  deterministic descriptor for `files.info` plus authenticated download, or a
+  direct authenticated download descriptor when Slack file URLs are already
+  present. File source refs now carry the same descriptor so Harn artifact
+  pipelines can import Slack-hosted PDFs/media without bespoke Slack logic.
+- **Modern Slack file import descriptors.** `artifact_import_request(...)`
+  builds Slack's external upload flow (`files.getUploadURLExternal` →
+  upload bytes → `files.completeUploadExternal`) and remote-file registration
+  flow (`files.remote.add` / `files.remote.share`). The connector does not use
+  deprecated `files.upload`.
+- **File event normalization.** `file_created` and `file_shared` events now
+  normalize into the same source/triage model as messages and reactions,
+  including canonical file deep links, privacy flags, and artifact export refs.
+- **`files.info` Web API dispatch.** `call("files.info", ...)` now performs the
+  Slack-compatible GET request shape and returns normalized Slack API errors.
+
+### Changed
+
+- Bumped package compatibility to Harn 0.9.x and the pinned local CLI to
+  0.9.18.
+
 ## 0.2.0
 
 ### Added

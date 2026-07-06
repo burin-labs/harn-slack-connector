@@ -74,5 +74,20 @@ pipeline test_triage_source(harness) {
     "slack://file?team=T123&id=F123",
     "file deep link",
   )
+  let file_shared = normalize_inbound(fixture_raw(harness, "file_shared", secret, ts))
+  let file_payload = file_shared.event.payload
+  let file_ref = ref_by_kind(file_payload.source_refs, "file")
+  assert_eq(file_payload.source.kind, "file", "file event source kind")
+  assert_eq(file_payload.source.file_id, "F123", "file event source id")
+  assert_eq(file_payload.source.deep_link, "slack://file?team=T123&id=F123", "file event deep link")
+  assert_eq(file_ref?.file_id, "F123", "file event file ref")
+  assert_eq(file_ref?.url, "https://acme.slack.com/files/UFILE/F123/report.pdf", "file event URL")
+  assert_eq(
+    file_ref?.artifact_export_request?.method,
+    "artifact.export_request",
+    "file export helper method",
+  )
+  assert_eq(file_payload.triage.source_kind, "file", "file event triage source kind")
+  assert(contains(file_payload.triage.privacy.flags, "contains_file_ref"), "file event privacy flag")
   shutdown()
 }
