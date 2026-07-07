@@ -23,7 +23,7 @@ pub fn fixture_ts(harness) {
 
 /** Build signed Slack request headers for fixture webhook bodies. */
 pub fn slack_headers(secret, body, ts) {
-  let basestring = "v0:" + to_string(ts) + ":" + body
+  const basestring = "v0:" + to_string(ts) + ":" + body
   return {
     "x-slack-request-timestamp": to_string(ts),
     "x-slack-signature": "v0=" + hmac_sha256(secret, basestring),
@@ -37,7 +37,7 @@ pub fn slack_headers(secret, body, ts) {
  * trusted clock, so this builder no longer plants those fields.
  */
 pub fn signed_raw(secret, body, ts, extra = nil) {
-  let raw = {signing_secret: secret, body_text: body, headers: slack_headers(secret, body, ts)}
+  const raw = {signing_secret: secret, body_text: body, headers: slack_headers(secret, body, ts)}
   return raw + (extra ?? {})
 }
 
@@ -47,7 +47,7 @@ pub fn signed_raw(secret, body, ts, extra = nil) {
  * as the Events API, so we reuse `slack_headers` and add the form content-type.
  */
 pub fn signed_form_raw(secret, body, ts, extra = nil) {
-  let raw = {
+  const raw = {
     signing_secret: secret,
     body_text: body,
     headers: slack_headers(secret, body, ts) + {"content-type": "application/x-www-form-urlencoded"},
@@ -81,19 +81,19 @@ pub fn assert_slack_interface() {
   require kinds()[0] == "webhook", "webhook kind"
   require payload_schema().harn_schema_name == "SlackEventPayload", "payload schema name"
   require payload_schema().json_schema.type == "object", "payload schema json object"
-  let methods = outbound_methods()
+  const methods = outbound_methods()
   require methods[0].method == "apps.connections.open", "method policies are exposed"
-  let post_message = method_policy_by_name(methods, "chat.postMessage")
+  const post_message = method_policy_by_name(methods, "chat.postMessage")
   require post_message != nil, "write method is listed"
   require post_message.requires_approval, "write method requires approval"
-  let file_info = method_policy_by_name(methods, "files.info")
+  const file_info = method_policy_by_name(methods, "files.info")
   require file_info != nil, "files.info method is listed"
   require !file_info.requires_approval, "files.info does not require approval"
-  let artifact_import = method_policy_by_name(methods, "artifact.import_request")
+  const artifact_import = method_policy_by_name(methods, "artifact.import_request")
   require artifact_import != nil, "artifact import method is listed"
   require artifact_import.requires_approval, "artifact import requires approval"
-  let initialized = init({signing_secret: "test-secret", include_bot_messages: false})
+  const initialized = init({signing_secret: "test-secret", include_bot_messages: false})
   require initialized.initialized, "init stores state"
-  let activated = activate([{id: "primary", path: "/slack/events", secrets: {signing_secret: "test-secret"}}])
+  const activated = activate([{id: "primary", path: "/slack/events", secrets: {signing_secret: "test-secret"}}])
   require activated.bindings == 1, "activate counts bindings"
 }

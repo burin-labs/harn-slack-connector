@@ -11,10 +11,10 @@ fn ref_by_kind(refs, kind) {
 }
 
 pipeline test_triage_source(harness) {
-  let secret = "triage-secret"
-  let ts = fixture_ts(harness)
-  let message = normalize_inbound(fixture_raw(harness, "message_channel_1", secret, ts))
-  let payload = message.event.payload
+  const secret = "triage-secret"
+  const ts = fixture_ts(harness)
+  const message = normalize_inbound(fixture_raw(harness, "message_channel_1", secret, ts))
+  const payload = message.event.payload
   assert_eq(payload.source.kind, "message", "message source kind")
   assert_eq(
     payload.source.url,
@@ -44,8 +44,8 @@ pipeline test_triage_source(harness) {
   )
   assert_eq(payload.triage.action_intents[3].requires_approval, true, "reply intent approval gate")
   assert_eq(payload.triage.source_timestamp, "1713650000.000100", "triage source timestamp")
-  let thread = normalize_inbound(fixture_raw(harness, "message_thread_3", secret, ts))
-  let thread_payload = thread.event.payload
+  const thread = normalize_inbound(fixture_raw(harness, "message_thread_3", secret, ts))
+  const thread_payload = thread.event.payload
   assert_eq(thread_payload.source.kind, "thread_message", "thread source kind")
   assert_eq(thread_payload.source.thread_root_ts, "1713650000.000100", "thread root ts")
   assert_eq(
@@ -58,15 +58,15 @@ pipeline test_triage_source(harness) {
     "1713650000.000100",
     "thread permalink root",
   )
-  let dm = normalize_inbound(fixture_raw(harness, "message_im_2", secret, ts))
+  const dm = normalize_inbound(fixture_raw(harness, "message_im_2", secret, ts))
   assert_eq(dm.event.payload.source.kind, "direct_message", "dm source kind")
   assert_eq(dm.event.payload.triage.privacy.classification, "private", "dm privacy")
   assert(contains(dm.event.payload.triage.privacy.flags, "direct_message"), "dm privacy flag")
-  let mention = normalize_inbound(fixture_raw(harness, "app_mention_channel_1", secret, ts))
+  const mention = normalize_inbound(fixture_raw(harness, "app_mention_channel_1", secret, ts))
   assert_eq(mention.event.payload.source.kind, "mention", "mention source kind")
   assert_eq(mention.event.payload.triage.mentions[0], "B123", "mention ids")
   assert_eq(mention.event.payload.triage.priority_hints.mention, true, "mention priority hint")
-  let file_reaction = normalize_inbound(fixture_raw(harness, "reaction_added_file_3", secret, ts))
+  const file_reaction = normalize_inbound(fixture_raw(harness, "reaction_added_file_3", secret, ts))
   assert_eq(file_reaction.event.payload.source.kind, "file_reaction", "file reaction kind")
   assert_eq(ref_by_kind(file_reaction.event.payload.source_refs, "file").file_id, "F123", "file ref")
   assert_eq(
@@ -74,9 +74,9 @@ pipeline test_triage_source(harness) {
     "slack://file?team=T123&id=F123",
     "file deep link",
   )
-  let file_shared = normalize_inbound(fixture_raw(harness, "file_shared", secret, ts))
-  let file_payload = file_shared.event.payload
-  let file_ref = ref_by_kind(file_payload.source_refs, "file")
+  const file_shared = normalize_inbound(fixture_raw(harness, "file_shared", secret, ts))
+  const file_payload = file_shared.event.payload
+  const file_ref = ref_by_kind(file_payload.source_refs, "file")
   assert_eq(file_payload.source.kind, "file", "file event source kind")
   assert_eq(file_payload.source.file_id, "F123", "file event source id")
   assert_eq(file_payload.source.deep_link, "slack://file?team=T123&id=F123", "file event deep link")
