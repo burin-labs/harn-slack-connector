@@ -8,11 +8,11 @@ import {
 } from "./helpers"
 
 pipeline test_normalize_smoke(harness) {
-  let secret = "test-signing-secret"
-  let ts = fixture_ts(harness)
+  const secret = "test-signing-secret"
+  const ts = fixture_ts(harness)
   assert_slack_interface()
-  let url_body = fixture_body(harness, "url_verification")
-  let url_result = normalize_inbound(signed_raw(secret, url_body, ts))
+  const url_body = fixture_body(harness, "url_verification")
+  const url_result = normalize_inbound(signed_raw(secret, url_body, ts))
   assert_eq(url_result.type, "immediate_response", "url verification result type")
   assert_eq(url_result.immediate_response.status, 200, "url verification status")
   assert_eq(url_result.immediate_response.body, "challenge-abc-123", "url verification challenge")
@@ -22,8 +22,8 @@ pipeline test_normalize_smoke(harness) {
     "url verification content type",
   )
   assert(url_result.event == nil, "url verification skips event")
-  let event_body = fixture_body(harness, "message_channel_1")
-  let event_result = normalize_inbound(signed_raw(secret, event_body, ts))
+  const event_body = fixture_body(harness, "message_channel_1")
+  const event_result = normalize_inbound(signed_raw(secret, event_body, ts))
   assert_eq(event_result.type, "event", "event callback result type")
   assert_eq(event_result.event.kind, "message", "message event type")
   assert_eq(event_result.event.dedupe_key, "slack:event:Ev-message-1", "message dedupe key")
@@ -39,11 +39,11 @@ pipeline test_normalize_smoke(harness) {
     "[redacted]",
     "provider raw signature redacted",
   )
-  let empty_body = normalize_inbound({signing_secret: secret, headers: slack_headers(secret, "", ts)})
+  const empty_body = normalize_inbound({signing_secret: secret, headers: slack_headers(secret, "", ts)})
   assert_eq(empty_body.type, "reject", "empty body rejects (F12)")
   assert_eq(empty_body.reject.status, 400, "empty body status")
   assert_eq(empty_body.reject.body.error, "missing_body_text", "empty body error")
-  let retry_result = normalize_inbound(
+  const retry_result = normalize_inbound(
     signed_raw(
       secret,
       event_body,
@@ -65,12 +65,12 @@ pipeline test_normalize_smoke(harness) {
     event_result.event.dedupe_key,
     "retry keeps deterministic dedupe",
   )
-  let unsupported_body = "{\"token\":\"legacy-token\",\"team_id\":\"T123\",\"api_app_id\":\"A123\",\"event\":{\"type\":\"workflow_step_execute\",\"user\":\"U111\",\"channel\":\"D111\",\"event_ts\":\"1713650400.000100\"},\"type\":\"event_callback\",\"event_id\":\"Ev-unsupported\",\"event_time\":1713650400}"
-  let unsupported = normalize_inbound(signed_raw(secret, unsupported_body, ts))
+  const unsupported_body = "{\"token\":\"legacy-token\",\"team_id\":\"T123\",\"api_app_id\":\"A123\",\"event\":{\"type\":\"workflow_step_execute\",\"user\":\"U111\",\"channel\":\"D111\",\"event_ts\":\"1713650400.000100\"},\"type\":\"event_callback\",\"event_id\":\"Ev-unsupported\",\"event_time\":1713650400}"
+  const unsupported = normalize_inbound(signed_raw(secret, unsupported_body, ts))
   assert_eq(unsupported.type, "reject", "unsupported event rejects")
   assert_eq(unsupported.reject.status, 400, "unsupported event status")
   assert_eq(unsupported.reject.body.error, "unsupported_event", "unsupported event error")
-  let tampered = normalize_inbound(
+  const tampered = normalize_inbound(
     {
       signing_secret: secret,
       body_text: event_body + " ",
@@ -80,7 +80,7 @@ pipeline test_normalize_smoke(harness) {
   assert_eq(tampered.type, "reject", "tampered body rejects")
   assert_eq(tampered.reject.status, 403, "tampered body status")
   assert_eq(tampered.reject.body.error, "invalid_signature", "tampered body error")
-  let missing_signature = normalize_inbound(
+  const missing_signature = normalize_inbound(
     {
       signing_secret: secret,
       body_text: event_body,
@@ -91,8 +91,8 @@ pipeline test_normalize_smoke(harness) {
   assert_eq(missing_signature.reject.body.error, "missing_signature", "missing signature error")
   // F10: the connector now derives `now` from the trusted clock — callers can no
   // longer plant a stale request-timestamp by overriding `raw.now`.
-  let expired_ts = ts - 301
-  let expired = normalize_inbound(
+  const expired_ts = ts - 301
+  const expired = normalize_inbound(
     {
       signing_secret: secret,
       body_text: event_body,
@@ -101,7 +101,7 @@ pipeline test_normalize_smoke(harness) {
   )
   assert_eq(expired.type, "reject", "expired timestamp rejects")
   assert_eq(expired.reject.body.error, "expired_timestamp", "expired timestamp error")
-  let wrong_secret = normalize_inbound(
+  const wrong_secret = normalize_inbound(
     {
       signing_secret: "wrong-secret",
       body_text: event_body,
