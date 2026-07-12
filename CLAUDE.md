@@ -9,7 +9,7 @@ Shared connector rules are in the Harn authoring guide:
 Keep this file to Slack-specific notes. Put shared connector guidance in the
 Harn guide first.
 
-## Provider Notes
+## Provider notes
 
 - Slack Events API requires an HTTP response within 3 seconds. Keep
   `normalize_inbound` CPU-only: verify HMAC, parse JSON, and return the
