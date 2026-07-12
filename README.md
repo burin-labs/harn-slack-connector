@@ -18,10 +18,10 @@ JSON, returns an ack/result, and performs no outbound network work.
 ## Install
 
 ```sh
-harn add @burin/slack-connector@0.2.1
+harn add github.com/burin-labs/harn-slack-connector@v0.2.1
 ```
 
-For local multi-repo development:
+Use a path checkout for unreleased `main` or local multi-repo development:
 
 ```toml
 [dependencies]
