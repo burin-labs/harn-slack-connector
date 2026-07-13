@@ -99,7 +99,9 @@ const SLACK_OUTBOUND_METHOD_POLICIES = [
   },
 ]
 
-let SLACK_STATE = {initialized: false, active: false, bindings: {}, ctx: {}}
+type SlackConnectorState = {initialized: bool, active: bool, bindings: dict, ctx: dict}
+
+let SLACK_STATE: SlackConnectorState = {initialized: false, active: false, bindings: {}, ctx: {}}
 
 /** Return this connector's Harn provider id. */
 pub fn provider_id() {
@@ -184,7 +186,15 @@ pub fn payload_schema() {
 /** Initialize connector state with orchestrator context. */
 pub fn init(ctx = nil) {
   const current = __state()
-  const next = current + {initialized: true, ctx: ctx ?? {}}
+  const next = current
+    + {
+    initialized: true,
+    ctx: if type_of(ctx) == "dict" {
+      ctx
+    } else {
+      {}
+    },
+  }
   __set_state(next)
   return next
 }
@@ -781,8 +791,8 @@ fn __slack_scope_candidates(args, disclosure) {
     args?.config?.oauth_scopes,
     args?.metadata?.granted_scopes,
     args?.metadata?.oauth_scopes,
-    __state()?.ctx?.granted_scopes,
-    __state()?.ctx?.oauth_scopes,
+    __state().ctx?.granted_scopes,
+    __state().ctx?.oauth_scopes,
   ]
 }
 
@@ -947,11 +957,11 @@ pub fn post_eval_verdict(verdict, options = nil) {
   return call("chat.postMessage", unwrap(payload))
 }
 
-fn __state() {
+fn __state() -> SlackConnectorState {
   return SLACK_STATE
 }
 
-fn __set_state(state) {
+fn __set_state(state: SlackConnectorState) {
   SLACK_STATE = state
   return state
 }
