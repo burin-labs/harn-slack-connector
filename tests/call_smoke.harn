@@ -1,4 +1,13 @@
-import { artifact_export_request, artifact_import_request, call } from "../src/lib"
+import { artifact_export_request, artifact_import_request, call, init, shutdown } from "../src/lib"
+
+pipeline test_init_context_boundary(task) {
+  shutdown()
+  const normalized = init("invalid-context")
+  assert_eq(normalized.ctx, {}, "non-dict init context is normalized")
+  const initialized = init({signing_secret: "secret"})
+  assert_eq(initialized.ctx.signing_secret, "secret", "dict init context is retained")
+  shutdown()
+}
 
 pipeline test_call_smoke(task) {
   egress_policy({allow: ["api.slack.com"], default: "deny"})
