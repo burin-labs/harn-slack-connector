@@ -1,6 +1,17 @@
 import { call, shutdown, socket_mode_connect, socket_mode_receive } from "../src/lib"
 import { fixture_body } from "./helpers"
 
+fn __is_sandbox_restriction(error) {
+  return error_is(error, "tool_rejected")
+}
+
+pipeline test_socket_mode_sandbox_restriction_classification(task) {
+  const restricted = {category: "tool_rejected", message: "sandbox wording may change"}
+  assert(__is_sandbox_restriction(restricted), "structured sandbox restriction recognized")
+  const unrelated = {category: "transient_network", message: "network ceiling"}
+  assert(!__is_sandbox_restriction(unrelated), "message text does not classify unrelated errors")
+}
+
 pipeline test_socket_mode_smoke(harness) {
   egress_policy({allow: ["api.slack.com", "socket.slack.test"], default: "deny"})
   transport_mock_clear()
@@ -37,11 +48,10 @@ pipeline test_socket_mode_smoke(harness) {
     )
   }
   if is_err(conn_result) {
-    const error_text = to_string(unwrap_err(conn_result))
-    assert(
-      contains(error_text, "network ceiling"),
-      "socket mode websocket skipped only for sandbox network ceiling",
-    )
+    const error = unwrap_err(conn_result)
+    if !__is_sandbox_restriction(error) {
+      throw error
+    }
     transport_mock_clear()
     shutdown()
     return
