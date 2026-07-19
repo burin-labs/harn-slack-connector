@@ -40,7 +40,13 @@ pipeline test_assistant_methods(harness) {
   assert_eq(ephemeral.ok, true, "chat.postEphemeral ok")
   call(
     "assistant.threads.setStatus",
-    {api_base_url: base, bot_token: token, channel_id: "D1", thread_ts: "1.1", status: "is thinking..."},
+    {
+      api_base_url: base,
+      bot_token: token,
+      channel_id: "D1",
+      thread_ts: "1.1",
+      status: "is thinking...",
+    },
   )
   call(
     "assistant.threads.setSuggestedPrompts",
@@ -54,13 +60,23 @@ pipeline test_assistant_methods(harness) {
   )
   call(
     "assistant.threads.setTitle",
-    {api_base_url: base, bot_token: token, channel_id: "D1", thread_ts: "1.1", title: "Deploy chat"},
+    {
+      api_base_url: base,
+      bot_token: token,
+      channel_id: "D1",
+      thread_ts: "1.1",
+      title: "Deploy chat",
+    },
   )
   const calls = http_mock_calls()
   assert_eq(len(calls), 4, "all assistant + ephemeral methods dispatched")
   assert_eq(calls[0].url, base + "/chat.postEphemeral", "ephemeral URL")
   assert_eq(calls[1].url, base + "/assistant.threads.setStatus", "setStatus URL")
-  assert_eq(calls[2].url, base + "/assistant.threads.setSuggestedPrompts", "setSuggestedPrompts URL")
+  assert_eq(
+    calls[2].url,
+    base + "/assistant.threads.setSuggestedPrompts",
+    "setSuggestedPrompts URL",
+  )
   assert_eq(calls[3].url, base + "/assistant.threads.setTitle", "setTitle URL")
   assert_eq(calls[0].headers.authorization, "[redacted]", "ephemeral auth redacted")
   const status_body = json_parse(calls[1].body)

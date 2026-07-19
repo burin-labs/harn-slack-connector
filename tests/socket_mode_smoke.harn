@@ -33,8 +33,16 @@ pipeline test_socket_mode_smoke(harness) {
   assert_eq(http_calls[0].headers.authorization, "[redacted]", "app token header redacted")
   http_mock_clear()
   const payload = json_parse(fixture_body(harness, "app_mention_channel_1"))
-  const envelope = {envelope_id: "env-1", type: "events_api", accepts_response_payload: false, payload: payload}
-  websocket_mock("wss://socket.slack.test/app/*", {messages: [json_stringify(envelope)], echo: true})
+  const envelope = {
+    envelope_id: "env-1",
+    type: "events_api",
+    accepts_response_payload: false,
+    payload: payload,
+  }
+  websocket_mock(
+    "wss://socket.slack.test/app/*",
+    {messages: [json_stringify(envelope)], echo: true},
+  )
   // Socket Mode is opt-in: callers must pass enable_socket_mode + an xapp- token.
   const conn_result = try {
     socket_mode_connect(

@@ -31,7 +31,11 @@ pipeline test_triage_source(harness) {
   assert_eq(payload.source.dedupe_key, "slack:message:T123:C111:1713650000.000100", "source dedupe")
   assert_eq(payload.triage.schema, "harn.triage.source.v1", "triage source schema")
   assert_eq(payload.triage.dedupe_key, payload.source.dedupe_key, "triage uses source dedupe")
-  assert_eq(payload.triage.delivery_dedupe_key, message.event.dedupe_key, "delivery dedupe retained")
+  assert_eq(
+    payload.triage.delivery_dedupe_key,
+    message.event.dedupe_key,
+    "delivery dedupe retained",
+  )
   assert_eq(payload.triage.content_text, "hello channel", "triage content text")
   assert_eq(payload.provider_raw.envelope.event.type, "message", "raw envelope retained separately")
   assert_eq(payload.provider_raw.event.type, "message", "raw event retained separately")
@@ -68,7 +72,11 @@ pipeline test_triage_source(harness) {
   assert_eq(mention.event.payload.triage.priority_hints.mention, true, "mention priority hint")
   const file_reaction = normalize_inbound(fixture_raw(harness, "reaction_added_file_3", secret, ts))
   assert_eq(file_reaction.event.payload.source.kind, "file_reaction", "file reaction kind")
-  assert_eq(ref_by_kind(file_reaction.event.payload.source_refs, "file").file_id, "F123", "file ref")
+  assert_eq(
+    ref_by_kind(file_reaction.event.payload.source_refs, "file").file_id,
+    "F123",
+    "file ref",
+  )
   assert_eq(
     ref_by_kind(file_reaction.event.payload.source_refs, "file").deep_link,
     "slack://file?team=T123&id=F123",
@@ -88,6 +96,9 @@ pipeline test_triage_source(harness) {
     "file export helper method",
   )
   assert_eq(file_payload.triage.source_kind, "file", "file event triage source kind")
-  assert(contains(file_payload.triage.privacy.flags, "contains_file_ref"), "file event privacy flag")
+  assert(
+    contains(file_payload.triage.privacy.flags, "contains_file_ref"),
+    "file event privacy flag",
+  )
   shutdown()
 }

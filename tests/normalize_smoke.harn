@@ -39,7 +39,9 @@ pipeline test_normalize_smoke(harness) {
     "[redacted]",
     "provider raw signature redacted",
   )
-  const empty_body = normalize_inbound({signing_secret: secret, headers: slack_headers(secret, "", ts)})
+  const empty_body = normalize_inbound(
+    {signing_secret: secret, headers: slack_headers(secret, "", ts)},
+  )
   assert_eq(empty_body.type, "reject", "empty body rejects (F12)")
   assert_eq(empty_body.reject.status, 400, "empty body status")
   assert_eq(empty_body.reject.body.error, "missing_body_text", "empty body error")
@@ -50,7 +52,10 @@ pipeline test_normalize_smoke(harness) {
       ts,
       {
         headers: slack_headers(secret, event_body, ts)
-          + {"x-slack-retry-num": "1", "x-slack-retry-reason": "http_timeout"},
+          + {
+          "x-slack-retry-num": "1",
+          "x-slack-retry-reason": "http_timeout",
+        },
       },
     ),
   )
@@ -65,7 +70,8 @@ pipeline test_normalize_smoke(harness) {
     event_result.event.dedupe_key,
     "retry keeps deterministic dedupe",
   )
-  const unsupported_body = "{\"token\":\"legacy-token\",\"team_id\":\"T123\",\"api_app_id\":\"A123\",\"event\":{\"type\":\"workflow_step_execute\",\"user\":\"U111\",\"channel\":\"D111\",\"event_ts\":\"1713650400.000100\"},\"type\":\"event_callback\",\"event_id\":\"Ev-unsupported\",\"event_time\":1713650400}"
+  const unsupported_body =
+    "{\"token\":\"legacy-token\",\"team_id\":\"T123\",\"api_app_id\":\"A123\",\"event\":{\"type\":\"workflow_step_execute\",\"user\":\"U111\",\"channel\":\"D111\",\"event_ts\":\"1713650400.000100\"},\"type\":\"event_callback\",\"event_id\":\"Ev-unsupported\",\"event_time\":1713650400}"
   const unsupported = normalize_inbound(signed_raw(secret, unsupported_body, ts))
   assert_eq(unsupported.type, "reject", "unsupported event rejects")
   assert_eq(unsupported.reject.status, 400, "unsupported event status")
