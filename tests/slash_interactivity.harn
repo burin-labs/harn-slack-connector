@@ -48,7 +48,11 @@ pipeline test_slash_interactivity(harness) {
   const action = normalize_inbound(signed_form_raw(secret, action_body, ts))
   assert_eq(action.type, "event", "block_actions result type")
   assert_eq(action.event.kind, "interactivity", "block_actions kind")
-  assert_eq(action.event.payload.interaction_type, "block_actions", "block_actions interaction type")
+  assert_eq(
+    action.event.payload.interaction_type,
+    "block_actions",
+    "block_actions interaction type",
+  )
   assert_eq(action.event.payload.action_id, "approve_btn", "block_actions action id")
   assert_eq(action.event.payload.channel, "C901", "block_actions channel")
   assert_eq(action.event.payload.user.id, "U901", "block_actions user")
@@ -71,7 +75,9 @@ pipeline test_slash_interactivity(harness) {
   assert_eq(view.event.payload.callback_id, "submit_form", "view_submission callback id")
   assert_eq(view.event.payload.view.id, "V1", "view_submission view retained")
   // --- assistant_thread_context_changed ---
-  const ctx = normalize_inbound(fixture_raw(harness, "assistant_thread_context_changed", secret, ts))
+  const ctx = normalize_inbound(
+    fixture_raw(harness, "assistant_thread_context_changed", secret, ts),
+  )
   assert_eq(ctx.event.kind, "assistant_thread_context_changed", "context changed kind")
   assert_eq(
     ctx.event.payload.event_type,

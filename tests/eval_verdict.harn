@@ -2,7 +2,10 @@ import { eval_verdict_post_message_payload, post_eval_verdict } from "../src/lib
 
 pipeline test_eval_verdict_post_message_payload(task) {
   const verdict = sample_verdict()
-  const payload = eval_verdict_post_message_payload(verdict, {channel: "C111", thread_ts: "1713650000.000100"})
+  const payload = eval_verdict_post_message_payload(
+    verdict,
+    {channel: "C111", thread_ts: "1713650000.000100"},
+  )
   assert(!is_err(payload), "payload formats")
   assert_eq(payload.channel, "C111", "channel is carried")
   assert_eq(payload.thread_ts, "1713650000.000100", "thread ts is carried")
@@ -22,7 +25,11 @@ pipeline test_post_eval_verdict_smoke(task) {
   http_mock(
     "POST",
     base + "/chat.postMessage",
-    {status: 200, body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000100\"}", headers: {}},
+    {
+      status: 200,
+      body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000100\"}",
+      headers: {},
+    },
   )
   const posted = post_eval_verdict(
     sample_verdict(),

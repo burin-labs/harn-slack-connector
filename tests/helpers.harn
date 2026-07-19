@@ -50,7 +50,8 @@ pub fn signed_form_raw(secret, body, ts, extra = nil) {
   const raw = {
     signing_secret: secret,
     body_text: body,
-    headers: slack_headers(secret, body, ts) + {"content-type": "application/x-www-form-urlencoded"},
+    headers: slack_headers(secret, body, ts)
+      + {"content-type": "application/x-www-form-urlencoded"},
   }
   return raw + (extra ?? {})
 }
@@ -94,6 +95,8 @@ pub fn assert_slack_interface() {
   require artifact_import.requires_approval, "artifact import requires approval"
   const initialized = init({signing_secret: "test-secret", include_bot_messages: false})
   require initialized.initialized, "init stores state"
-  const activated = activate([{id: "primary", path: "/slack/events", secrets: {signing_secret: "test-secret"}}])
+  const activated = activate(
+    [{id: "primary", path: "/slack/events", secrets: {signing_secret: "test-secret"}}],
+  )
   require activated.bindings == 1, "activate counts bindings"
 }

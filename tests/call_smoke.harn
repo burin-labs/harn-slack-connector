@@ -19,14 +19,21 @@ pipeline test_call_smoke(task) {
   http_mock(
     "POST",
     base + "/*",
-    {status: 200, body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000100\"}", headers: {}},
+    {
+      status: 200,
+      body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000100\"}",
+      headers: {},
+    },
   )
   http_mock(
     "GET",
     base + "/files.info*",
     {status: 200, body: "{\"ok\":true,\"file\":{\"id\":\"F111\"}}", headers: {}},
   )
-  const posted = call("chat.postMessage", {api_base_url: base, bot_token: token, channel: "C111", text: "hello"})
+  const posted = call(
+    "chat.postMessage",
+    {api_base_url: base, bot_token: token, channel: "C111", text: "hello"},
+  )
   assert_eq(posted.ok, true, "postMessage ok")
   assert_eq(posted.channel, "C111", "postMessage response channel")
   call(
@@ -64,7 +71,10 @@ pipeline test_call_smoke(task) {
     "views.open",
     {api_base_url: base, bot_token: token, trigger_id: "trigger-1", view: {type: "modal"}},
   )
-  call("views.update", {api_base_url: base, bot_token: token, view_id: "V111", view: {type: "modal"}})
+  call(
+    "views.update",
+    {api_base_url: base, bot_token: token, view_id: "V111", view: {type: "modal"}},
+  )
   call(
     "apps.connections.open",
     {api_base_url: base, app_token: "xapp-test-token", app_token_secret: "slack/app-token"},
@@ -102,7 +112,9 @@ pipeline test_call_smoke(task) {
   assert_eq(modal_body.view.type, "modal", "modal view body")
   assert_eq(calls[13].url, base + "/apps.connections.open", "apps.connections.open URL")
   assert(socket_body.app_token_secret == nil, "app token secret id is not sent")
-  const export_request = artifact_export_request({api_base_url: base, bot_token: token, file_id: "F111", name: "report.pdf"})
+  const export_request = artifact_export_request(
+    {api_base_url: base, bot_token: token, file_id: "F111", name: "report.pdf"},
+  )
   assert_eq(export_request.kind, "artifact_export", "artifact export descriptor kind")
   assert_eq(export_request.method, "GET", "artifact export uses GET")
   assert_eq(export_request.url, base + "/files.info", "artifact export info URL")
@@ -173,7 +185,11 @@ pipeline test_call_smoke(task) {
   http_mock(
     "POST",
     base + "/chat.postMessage",
-    {status: 200, body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000100\"}", headers: {}},
+    {
+      status: 200,
+      body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000100\"}",
+      headers: {},
+    },
   )
   call(
     "chat.postMessage",
@@ -203,7 +219,11 @@ pipeline test_call_smoke(task) {
   http_mock(
     "POST",
     base + "/chat.postMessage",
-    {status: 200, body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000101\"}", headers: {}},
+    {
+      status: 200,
+      body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000101\"}",
+      headers: {},
+    },
   )
   call(
     "chat.postMessage",
@@ -229,9 +249,16 @@ pipeline test_call_smoke(task) {
   http_mock(
     "POST",
     base + "/chat.postMessage",
-    {status: 200, body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000102\"}", headers: {}},
+    {
+      status: 200,
+      body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000102\"}",
+      headers: {},
+    },
   )
-  const alias_posted = call("post_message", {api_base_url: base, bot_token: token, channel: "C111", text: "alias"})
+  const alias_posted = call(
+    "post_message",
+    {api_base_url: base, bot_token: token, channel: "C111", text: "alias"},
+  )
   const alias_call = http_mock_calls({include_sensitive: true})[0]
   assert_eq(alias_posted.ok, true, "friendly post_message alias succeeds")
   assert_eq(alias_call.url, base + "/chat.postMessage", "friendly alias uses chat.postMessage")
@@ -241,7 +268,10 @@ pipeline test_call_smoke(task) {
     base + "/chat.postMessage",
     {status: 200, body: "{\"ok\":false,\"error\":\"channel_not_found\"}", headers: {}},
   )
-  const slack_error = call("chat.postMessage", {api_base_url: base, bot_token: token, channel: "missing", text: "hello"})
+  const slack_error = call(
+    "chat.postMessage",
+    {api_base_url: base, bot_token: token, channel: "missing", text: "hello"},
+  )
   assert(is_err(slack_error), "ok false becomes Err")
   assert_eq(unwrap_err(slack_error).message, "channel_not_found", "ok false error")
   http_mock_clear()
@@ -250,11 +280,15 @@ pipeline test_call_smoke(task) {
     base + "/conversations.history",
     {
       status: 200,
-      body: "{\"ok\":false,\"error\":\"missing_scope\",\"needed\":\"channels:history\",\"provided\":\"chat:write\"}",
+      body:
+        "{\"ok\":false,\"error\":\"missing_scope\",\"needed\":\"channels:history\",\"provided\":\"chat:write\"}",
       headers: {},
     },
   )
-  const missing_scope = call("conversations.history", {api_base_url: base, bot_token: token, channel: "C111"})
+  const missing_scope = call(
+    "conversations.history",
+    {api_base_url: base, bot_token: token, channel: "C111"},
+  )
   assert(is_err(missing_scope), "missing scope is explicit")
   assert_eq(unwrap_err(missing_scope).code, "missing_scope", "missing scope code")
   assert_eq(
