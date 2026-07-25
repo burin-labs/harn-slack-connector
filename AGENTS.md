@@ -9,7 +9,7 @@ Shared connector authoring rules live in the Harn guide:
 Put shared connector guidance in the Harn guide and keep only
 provider-specific notes and local hazards here.
 
-`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
+`CLAUDE.md` points here. Edit `AGENTS.md` only.
 
 ## Provider notes
 
