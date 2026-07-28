@@ -10,6 +10,7 @@ This package implements Harn Connector Contract v1. Use the Harn CLI version
 pinned in `.harn-version`. The connector contract and package authoring rules
 live in the
 [Harn connector authoring guide](https://github.com/burin-labs/harn/blob/main/docs/src/connectors/authoring.md).
+The package manifest supports Harn `>=0.10,<0.11`.
 
 Slack expects an HTTP response within 3 seconds for Events API delivery.
 `normalize_inbound(...)` is intentionally CPU-only: it verifies HMAC, parses
@@ -193,7 +194,7 @@ oauth_config:
       - users:read
 settings:
   event_subscriptions:
-    request_url: https://example.com/slack/events
+    request_url: https://example.invalid/webhooks/slack
     bot_events:
       - app_mention
       - message.channels
@@ -204,6 +205,21 @@ settings:
 
 For Socket Mode, set `socket_mode_enabled: true` and create an app-level token
 with `connections:write`.
+
+Authorize and validate the narrow bot scopes selected above:
+
+```sh
+harn connect slack --scope \
+  app_mentions:read,channels:history,chat:write --json
+harn connect status --connector slack --json
+```
+
+Private-channel reads additionally require `groups:history` and app membership
+in the channel. Rotate bot or app tokens by installing the replacement,
+validating one typed call or Socket Mode acknowledgement, and only then
+revoking the old token. Rotate the signing secret by updating Slack and Harn
+together, then prove an old signature is rejected and a new signature is
+accepted.
 
 ## Normalized events
 
@@ -376,7 +392,7 @@ secret as `slack/signing-secret`, or set a binding-level `signing_secret_id` or
 
 Local verification:
 
-- `harn connector test "$(pwd)" --provider slack`
+- `harn package verify . --provider slack`
 - Harn Cloud local managed-ingress smoke using this package checkout
 
 ## Development
@@ -391,7 +407,7 @@ harn --version
 Run the local CI equivalent:
 
 ```sh
-harn connector test "$(pwd)" --provider slack
+harn package verify . --provider slack
 ```
 
 ## License
