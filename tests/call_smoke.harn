@@ -1,22 +1,22 @@
 import { artifact_export_request, artifact_import_request, call, init, shutdown } from "../src/lib"
 
-pipeline test_init_context_boundary(task) {
-  shutdown()
-  const normalized = init("invalid-context")
+pipeline test_init_context_boundary(harness: Harness, task) {
+  shutdown(harness)
+  const normalized = init(harness, "invalid-context")
   assert_eq(normalized.ctx, {}, "non-dict init context is normalized")
-  const initialized = init({signing_secret: "secret"})
+  const initialized = init(harness, {signing_secret: "secret"})
   assert_eq(initialized.ctx.signing_secret, "secret", "dict init context is retained")
-  shutdown()
+  shutdown(harness)
 }
 
-pipeline test_call_smoke(task) {
-  egress_policy({allow: ["api.slack.com"], default: "deny"})
-  http_mock_clear()
+pipeline test_call_smoke(harness: Harness, task) {
+  harness.net.egress_policy({allow: ["api.slack.com"], default: "deny"})
+  harness.testing.http_mock_clear()
   // F8: api_base_url is allowlisted to {slack.com, api.slack.com}; tests must
   // use one of those hosts even when targeting the http_mock layer.
   const base = "https://api.slack.com"
   const token = "xoxb-test-token"
-  http_mock(
+  harness.testing.http_mock(
     "POST",
     base + "/*",
     {
@@ -25,18 +25,20 @@ pipeline test_call_smoke(task) {
       headers: {},
     },
   )
-  http_mock(
+  harness.testing.http_mock(
     "GET",
     base + "/files.info*",
     {status: 200, body: "{\"ok\":true,\"file\":{\"id\":\"F111\"}}", headers: {}},
   )
   const posted = call(
+    harness,
     "chat.postMessage",
     {api_base_url: base, bot_token: token, channel: "C111", text: "hello"},
   )
   assert_eq(posted.ok, true, "postMessage ok")
   assert_eq(posted.channel, "C111", "postMessage response channel")
   call(
+    harness,
     "chat.getPermalink",
     {
       api_base_url: base,
@@ -49,37 +51,55 @@ pipeline test_call_smoke(task) {
       message_ts: "1713650000.000100",
     },
   )
-  call("files.info", {api_base_url: base, bot_token: token, file: "F111"})
+  call(harness, "files.info", {api_base_url: base, bot_token: token, file: "F111"})
   call(
+    harness,
     "chat.update",
     {api_base_url: base, bot_token: token, channel: "C111", ts: "1.1", text: "updated"},
   )
-  call("chat.delete", {api_base_url: base, bot_token: token, channel: "C111", ts: "1.1"})
-  call("conversations.history", {api_base_url: base, bot_token: token, channel: "C111", limit: 2})
-  call("conversations.replies", {api_base_url: base, bot_token: token, channel: "C111", ts: "1.1"})
-  call("users.info", {api_base_url: base, bot_token: token, user_id: "U111"})
-  call("users.lookupByEmail", {api_base_url: base, bot_token: token, email: "person@example.test"})
+  call(harness, "chat.delete", {api_base_url: base, bot_token: token, channel: "C111", ts: "1.1"})
   call(
+    harness,
+    "conversations.history",
+    {api_base_url: base, bot_token: token, channel: "C111", limit: 2},
+  )
+  call(
+    harness,
+    "conversations.replies",
+    {api_base_url: base, bot_token: token, channel: "C111", ts: "1.1"},
+  )
+  call(harness, "users.info", {api_base_url: base, bot_token: token, user_id: "U111"})
+  call(
+    harness,
+    "users.lookupByEmail",
+    {api_base_url: base, bot_token: token, email: "person@example.test"},
+  )
+  call(
+    harness,
     "reactions.add",
     {api_base_url: base, bot_token: token, channel: "C111", timestamp: "1.1", name: "eyes"},
   )
   call(
+    harness,
     "reactions.remove",
     {api_base_url: base, bot_token: token, channel: "C111", timestamp: "1.1", name: "eyes"},
   )
   call(
+    harness,
     "views.open",
     {api_base_url: base, bot_token: token, trigger_id: "trigger-1", view: {type: "modal"}},
   )
   call(
+    harness,
     "views.update",
     {api_base_url: base, bot_token: token, view_id: "V111", view: {type: "modal"}},
   )
   call(
+    harness,
     "apps.connections.open",
     {api_base_url: base, app_token: "xapp-test-token", app_token_secret: "slack/app-token"},
   )
-  const calls = http_mock_calls()
+  const calls = harness.testing.http_mock_calls()
   assert_eq(len(calls), 14, "all required outbound methods dispatched")
   const post_body = json_parse(calls[0].body)
   const permalink_body = json_parse(calls[1].body)
@@ -113,6 +133,7 @@ pipeline test_call_smoke(task) {
   assert_eq(calls[13].url, base + "/apps.connections.open", "apps.connections.open URL")
   assert(socket_body.app_token_secret == nil, "app token secret id is not sent")
   const export_request = artifact_export_request(
+    harness,
     {api_base_url: base, bot_token: token, file_id: "F111", name: "report.pdf"},
   )
   assert_eq(export_request.kind, "artifact_export", "artifact export descriptor kind")
@@ -122,6 +143,7 @@ pipeline test_call_smoke(task) {
   assert_eq(export_request.steps[1].id, "download_file", "artifact export download step")
   assert_eq(export_request.artifact.mime_type, "application/pdf", "artifact export MIME")
   const direct_export = call(
+    harness,
     "artifact.export_request",
     {
       api_base_url: base,
@@ -140,6 +162,7 @@ pipeline test_call_smoke(task) {
   )
   assert_eq(direct_export.auth.secret, "slack/bot-token", "direct file export auth secret")
   const upload_import = artifact_import_request(
+    harness,
     {
       api_base_url: base,
       bot_token: token,
@@ -158,6 +181,7 @@ pipeline test_call_smoke(task) {
   assert_eq(upload_import.steps[1].id, "upload_file", "upload import upload step")
   assert_eq(upload_import.steps[2].body.channel_id, "C111", "upload import complete channel")
   const remote_import = call(
+    harness,
     "artifact.import_request",
     {
       api_base_url: base,
@@ -181,8 +205,8 @@ pipeline test_call_smoke(task) {
       event_payload: {kind: "ai_generated", generator: "harn", surface: "slack"},
     },
   }
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     base + "/chat.postMessage",
     {
@@ -192,6 +216,7 @@ pipeline test_call_smoke(task) {
     },
   )
   call(
+    harness,
     "chat.postMessage",
     {
       api_base_url: base,
@@ -203,7 +228,9 @@ pipeline test_call_smoke(task) {
       _harn: {disclosure: {slack: disclosure}},
     },
   )
-  const fallback_body = json_parse(http_mock_calls({include_sensitive: true})[0].body)
+  const fallback_body = json_parse(
+    harness.testing.http_mock_calls({include_sensitive: true})[0].body,
+  )
   assert(fallback_body.username == nil, "custom username is stripped without chat:write.customize")
   assert(fallback_body.icon_emoji == nil, "custom icon is stripped without chat:write.customize")
   assert(
@@ -215,8 +242,8 @@ pipeline test_call_smoke(task) {
     "ai_generated",
     "AI marker is attached as Slack metadata",
   )
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     base + "/chat.postMessage",
     {
@@ -226,6 +253,7 @@ pipeline test_call_smoke(task) {
     },
   )
   call(
+    harness,
     "chat.postMessage",
     {
       api_base_url: base,
@@ -236,7 +264,7 @@ pipeline test_call_smoke(task) {
       _harn: {disclosure: {slack: disclosure}},
     },
   )
-  const custom_body = json_parse(http_mock_calls({include_sensitive: true})[0].body)
+  const custom_body = json_parse(harness.testing.http_mock_calls({include_sensitive: true})[0].body)
   assert_eq(custom_body.text, "ready", "customized messages keep caller text")
   assert_eq(custom_body.username, "Merge Captain", "custom username is sent with granted scope")
   assert_eq(custom_body.icon_emoji, ":robot_face:", "custom icon is sent with granted scope")
@@ -245,8 +273,8 @@ pipeline test_call_smoke(task) {
     "slack",
     "customized messages keep AI metadata",
   )
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     base + "/chat.postMessage",
     {
@@ -256,26 +284,28 @@ pipeline test_call_smoke(task) {
     },
   )
   const alias_posted = call(
+    harness,
     "post_message",
     {api_base_url: base, bot_token: token, channel: "C111", text: "alias"},
   )
-  const alias_call = http_mock_calls({include_sensitive: true})[0]
+  const alias_call = harness.testing.http_mock_calls({include_sensitive: true})[0]
   assert_eq(alias_posted.ok, true, "friendly post_message alias succeeds")
   assert_eq(alias_call.url, base + "/chat.postMessage", "friendly alias uses chat.postMessage")
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     base + "/chat.postMessage",
     {status: 200, body: "{\"ok\":false,\"error\":\"channel_not_found\"}", headers: {}},
   )
   const slack_error = call(
+    harness,
     "chat.postMessage",
     {api_base_url: base, bot_token: token, channel: "missing", text: "hello"},
   )
   assert(is_err(slack_error), "ok false becomes Err")
   assert_eq(unwrap_err(slack_error).message, "channel_not_found", "ok false error")
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     base + "/conversations.history",
     {
@@ -286,6 +316,7 @@ pipeline test_call_smoke(task) {
     },
   )
   const missing_scope = call(
+    harness,
     "conversations.history",
     {api_base_url: base, bot_token: token, channel: "C111"},
   )
@@ -296,11 +327,12 @@ pipeline test_call_smoke(task) {
     "channels:history",
     "missing scope needed detail",
   )
-  http_mock_clear()
-  const unsupported = call("pins.add", {api_base_url: base, bot_token: token})
+  harness.testing.http_mock_clear()
+  const unsupported = call(harness, "pins.add", {api_base_url: base, bot_token: token})
   assert(is_err(unsupported), "unsupported method rejected")
   assert_eq(unwrap_err(unsupported).code, "method_not_found", "unsupported method code")
   const app_token_for_bot_method = call(
+    harness,
     "chat.postMessage",
     {api_base_url: base, app_token: "xapp-test-token", channel: "C111", text: "hello"},
   )
@@ -313,6 +345,7 @@ pipeline test_call_smoke(task) {
   // F8: outbound calls to non-allowlisted hosts must be rejected so that bot
   // tokens never reach attacker-controlled origins.
   const disallowed = call(
+    harness,
     "chat.postMessage",
     {api_base_url: "https://evil.example/api", bot_token: token, channel: "C111", text: "x"},
   )

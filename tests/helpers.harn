@@ -17,7 +17,7 @@ import {
  * timestamp rather than a hard-coded value. Slack request timestamps are
  * always whole seconds, so we truncate the float here.
  */
-pub fn fixture_ts(harness) {
+pub fn fixture_ts(harness: Harness) {
   return to_int(harness.clock.timestamp())
 }
 
@@ -57,12 +57,12 @@ pub fn signed_form_raw(secret, body, ts, extra = nil) {
 }
 
 /** Read a Slack webhook fixture body by basename. */
-pub fn fixture_body(harness, name) {
-  return harness.fs.read_text(source_dir() + "/fixtures/webhooks/" + name + ".json")
+pub fn fixture_body(harness: Harness, name) {
+  return harness.fs.read_text(harness.fs.source_dir() + "/fixtures/webhooks/" + name + ".json")
 }
 
 /** Build a signed raw Events API request for a named webhook fixture. */
-pub fn fixture_raw(harness, name, secret, ts, extra = nil) {
+pub fn fixture_raw(harness: Harness, name, secret, ts, extra = nil) {
   return signed_raw(secret, fixture_body(harness, name), ts, extra)
 }
 
@@ -76,8 +76,8 @@ fn method_policy_by_name(methods, name) {
 }
 
 /** Assert the public connector metadata and lifecycle exports stay usable. */
-pub fn assert_slack_interface() {
-  shutdown()
+pub fn assert_slack_interface(harness: Harness) {
+  shutdown(harness)
   require provider_id() == "slack", "provider id"
   require kinds()[0] == "webhook", "webhook kind"
   require payload_schema().harn_schema_name == "SlackEventPayload", "payload schema name"
@@ -93,9 +93,10 @@ pub fn assert_slack_interface() {
   const artifact_import = method_policy_by_name(methods, "artifact.import_request")
   require artifact_import != nil, "artifact import method is listed"
   require artifact_import.requires_approval, "artifact import requires approval"
-  const initialized = init({signing_secret: "test-secret", include_bot_messages: false})
+  const initialized = init(harness, {signing_secret: "test-secret", include_bot_messages: false})
   require initialized.initialized, "init stores state"
   const activated = activate(
+    harness,
     [{id: "primary", path: "/slack/events", secrets: {signing_secret: "test-secret"}}],
   )
   require activated.bindings == 1, "activate counts bindings"
