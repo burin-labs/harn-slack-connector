@@ -12,26 +12,27 @@ pipeline test_socket_mode_sandbox_restriction_classification(task) {
   assert(!__is_sandbox_restriction(unrelated), "message text does not classify unrelated errors")
 }
 
-pipeline test_socket_mode_smoke(harness) {
-  egress_policy({allow: ["api.slack.com", "socket.slack.test"], default: "deny"})
-  transport_mock_clear()
-  http_mock_clear()
+pipeline test_socket_mode_smoke(harness: Harness) {
+  harness.net.egress_policy({allow: ["api.slack.com", "socket.slack.test"], default: "deny"})
+  harness.testing.transport_mock_clear()
+  harness.testing.http_mock_clear()
   // F8: api_base_url is allowlisted to {slack.com, api.slack.com}.
   const api_base = "https://api.slack.com"
   const opened_url = "wss://socket.slack.test/app/opened"
-  http_mock(
+  harness.testing.http_mock(
     "POST",
     api_base + "/apps.connections.open",
     {status: 200, body: "{\"ok\":true,\"url\":\"" + opened_url + "\"}", headers: {}},
   )
   const opened = call(
+    harness,
     "apps.connections.open",
     {api_base_url: api_base, app_token: "xapp-test", app_token_secret: "slack/app-token"},
   )
   assert_eq(opened.url, opened_url, "socket mode opens via apps.connections.open")
-  const http_calls = http_mock_calls()
+  const http_calls = harness.testing.http_mock_calls()
   assert_eq(http_calls[0].headers.authorization, "[redacted]", "app token header redacted")
-  http_mock_clear()
+  harness.testing.http_mock_clear()
   const payload = json_parse(fixture_body(harness, "app_mention_channel_1"))
   const envelope = {
     envelope_id: "env-1",
@@ -39,13 +40,14 @@ pipeline test_socket_mode_smoke(harness) {
     accepts_response_payload: false,
     payload: payload,
   }
-  websocket_mock(
+  harness.testing.websocket_mock(
     "wss://socket.slack.test/app/*",
     {messages: [json_stringify(envelope)], echo: true},
   )
   // Socket Mode is opt-in: callers must pass enable_socket_mode + an xapp- token.
   const conn_result = try {
     socket_mode_connect(
+      harness,
       {
         socket_url: "wss://socket.slack.test/app/test",
         timeout_ms: 0,
@@ -60,13 +62,13 @@ pipeline test_socket_mode_smoke(harness) {
     if !__is_sandbox_restriction(error) {
       throw error
     }
-    transport_mock_clear()
-    shutdown()
+    harness.testing.transport_mock_clear()
+    shutdown(harness)
     return
   }
   const conn = unwrap(conn_result)
   assert_eq(conn.transport, "socket_mode", "socket mode transport")
-  const result = socket_mode_receive(conn, {timeout_ms: 0})
+  const result = socket_mode_receive(harness, conn, {timeout_ms: 0})
   assert_eq(result.type, "event", "socket mode event result")
   assert_eq(result.envelope_id, "env-1", "socket mode envelope id")
   assert_eq(result.acked.acked, true, "socket mode ack flag")
@@ -74,12 +76,12 @@ pipeline test_socket_mode_smoke(harness) {
   assert_eq(result.event.payload.transport, "socket_mode", "payload transport")
   assert_eq(result.event.payload.envelope_id, "env-1", "payload envelope id")
   assert_eq(result.event.payload.resource_id, "C111/1713650100.000100", "socket mode resource")
-  const calls = transport_mock_calls()
+  const calls = harness.testing.transport_mock_calls()
   assert_eq(calls[0].kind, "websocket_connect", "socket mode opens websocket")
   assert_eq(calls[1].kind, "websocket_send", "socket mode sends ack")
   const ack_body = json_parse(calls[1].data)
   assert_eq(ack_body.envelope_id, "env-1", "socket mode ack envelope")
-  websocket_close(conn.socket)
-  transport_mock_clear()
-  shutdown()
+  harness.net.websocket_close(conn.socket)
+  harness.testing.transport_mock_clear()
+  shutdown(harness)
 }

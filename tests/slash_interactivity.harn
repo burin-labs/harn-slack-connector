@@ -6,14 +6,14 @@ import { fixture_raw, fixture_ts, signed_form_raw } from "./helpers"
  * submission) normalization, the assistant_thread_context_changed event, and
  * the canonical agent_summon envelope across app_mention / im / mpim / slash.
  */
-pipeline test_slash_interactivity(harness) {
+pipeline test_slash_interactivity(harness: Harness) {
   const secret = "event-secret"
   const ts = fixture_ts(harness)
   // --- Slash command (application/x-www-form-urlencoded) ---
   const slash_body = "command=%2Fdeploy&text=ship+it+now&user_id=U900&user_name=alice"
     + "&channel_id=C900&channel_name=ops&team_id=T123&trigger_id=trg-1"
     + "&response_url=https%3A%2F%2Fhooks.slack.com%2Fcommands%2Fr1&api_app_id=A123"
-  const slash = normalize_inbound(signed_form_raw(secret, slash_body, ts))
+  const slash = normalize_inbound(harness, signed_form_raw(secret, slash_body, ts))
   assert_eq(slash.type, "event", "slash command result type")
   assert_eq(slash.event.kind, "slash_command", "slash command kind")
   assert_eq(slash.event.signature_status.state, "verified", "slash command signature verified")
@@ -45,7 +45,7 @@ pipeline test_slash_interactivity(harness) {
     + "\"message\":{\"ts\":\"1713650000.000100\",\"thread_ts\":\"1713650000.000000\"},"
     + "\"actions\":[{\"action_id\":\"approve_btn\",\"block_id\":\"blk1\",\"value\":\"yes\"}]}"
   const action_body = "payload=" + unwrap(url_encode(action_json))
-  const action = normalize_inbound(signed_form_raw(secret, action_body, ts))
+  const action = normalize_inbound(harness, signed_form_raw(secret, action_body, ts))
   assert_eq(action.type, "event", "block_actions result type")
   assert_eq(action.event.kind, "interactivity", "block_actions kind")
   assert_eq(
@@ -65,7 +65,7 @@ pipeline test_slash_interactivity(harness) {
     + "\"team\":{\"id\":\"T123\"},\"trigger_id\":\"trg-3\","
     + "\"view\":{\"id\":\"V1\",\"callback_id\":\"submit_form\",\"type\":\"modal\"}}"
   const view_body = "payload=" + unwrap(url_encode(view_json))
-  const view = normalize_inbound(signed_form_raw(secret, view_body, ts))
+  const view = normalize_inbound(harness, signed_form_raw(secret, view_body, ts))
   assert_eq(view.event.kind, "interactivity", "view_submission kind")
   assert_eq(
     view.event.payload.interaction_type,
@@ -76,6 +76,7 @@ pipeline test_slash_interactivity(harness) {
   assert_eq(view.event.payload.view.id, "V1", "view_submission view retained")
   // --- assistant_thread_context_changed ---
   const ctx = normalize_inbound(
+    harness,
     fixture_raw(harness, "assistant_thread_context_changed", secret, ts),
   )
   assert_eq(ctx.event.kind, "assistant_thread_context_changed", "context changed kind")
@@ -88,14 +89,20 @@ pipeline test_slash_interactivity(harness) {
   assert_eq(ctx.event.payload.context.channel_id, "C456ASSIST", "context changed carries context")
   assert_eq(ctx.event.payload.source.kind, "assistant_thread", "context changed source kind")
   // --- assistant_thread_started carries its context ---
-  const started = normalize_inbound(fixture_raw(harness, "assistant_thread_started", secret, ts))
+  const started = normalize_inbound(
+    harness,
+    fixture_raw(harness, "assistant_thread_started", secret, ts),
+  )
   assert_eq(
     started.event.payload.context.channel_id,
     "C123ASSIST",
     "assistant_thread_started carries context",
   )
   // --- agent_summon across app_mention / im / mpim ---
-  const mention = normalize_inbound(fixture_raw(harness, "app_mention_channel_1", secret, ts))
+  const mention = normalize_inbound(
+    harness,
+    fixture_raw(harness, "app_mention_channel_1", secret, ts),
+  )
   const mention_summon = mention.event.payload.agent_summon
   assert_eq(mention_summon.prompt, "<@B123> deploy?", "mention summon prompt")
   assert_eq(mention_summon.channel_id, "C111", "mention summon channel")
@@ -104,20 +111,20 @@ pipeline test_slash_interactivity(harness) {
   assert_eq(mention_summon.team, "T123", "mention summon team")
   assert_eq(mention_summon.visibility, "public", "mention summon visibility")
   assert_eq(mention_summon.trigger_kind, "app_mention", "mention summon trigger kind")
-  const dm = normalize_inbound(fixture_raw(harness, "message_im_2", secret, ts))
+  const dm = normalize_inbound(harness, fixture_raw(harness, "message_im_2", secret, ts))
   const dm_summon = dm.event.payload.agent_summon
   assert_eq(dm_summon.prompt, "hello dm", "dm summon prompt")
   assert_eq(dm_summon.channel_kind, "im", "dm summon channel kind")
   assert_eq(dm_summon.visibility, "private", "dm summon visibility")
   assert_eq(dm_summon.trigger_kind, "message.im", "dm summon trigger kind")
-  const mpim = normalize_inbound(fixture_raw(harness, "message_mpim_1", secret, ts))
+  const mpim = normalize_inbound(harness, fixture_raw(harness, "message_mpim_1", secret, ts))
   const mpim_summon = mpim.event.payload.agent_summon
   assert_eq(mpim_summon.prompt, "group dm hello", "mpim summon prompt")
   assert_eq(mpim_summon.channel_kind, "mpim", "mpim summon channel kind")
   assert_eq(mpim_summon.visibility, "private", "mpim summon visibility")
   assert_eq(mpim_summon.trigger_kind, "message.mpim", "mpim summon trigger kind")
   // Plain public-channel messages are NOT summons.
-  const plain = normalize_inbound(fixture_raw(harness, "message_channel_1", secret, ts))
+  const plain = normalize_inbound(harness, fixture_raw(harness, "message_channel_1", secret, ts))
   assert(plain.event.payload.agent_summon == nil, "public channel message is not a summon")
-  shutdown()
+  shutdown(harness)
 }

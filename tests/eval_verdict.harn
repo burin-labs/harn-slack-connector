@@ -18,11 +18,11 @@ pipeline test_eval_verdict_post_message_payload(task) {
   assert_eq(unwrap_err(missing_channel).code, "missing_channel", "missing channel code")
 }
 
-pipeline test_post_eval_verdict_smoke(task) {
-  egress_policy({allow: ["api.slack.com"], default: "deny"})
-  http_mock_clear()
+pipeline test_post_eval_verdict_smoke(harness: Harness, task) {
+  harness.net.egress_policy({allow: ["api.slack.com"], default: "deny"})
+  harness.testing.http_mock_clear()
   const base = "https://api.slack.com"
-  http_mock(
+  harness.testing.http_mock(
     "POST",
     base + "/chat.postMessage",
     {
@@ -32,11 +32,12 @@ pipeline test_post_eval_verdict_smoke(task) {
     },
   )
   const posted = post_eval_verdict(
+    harness,
     sample_verdict(),
     {api_base_url: base, bot_token: "xoxb-test-token", channel: "C111"},
   )
   assert_eq(posted.ok, true, "post succeeds")
-  const calls = http_mock_calls()
+  const calls = harness.testing.http_mock_calls()
   assert_eq(len(calls), 1, "one Slack Web API call")
   assert_eq(calls[0].url, base + "/chat.postMessage", "postMessage URL")
   const body = json_parse(calls[0].body)
