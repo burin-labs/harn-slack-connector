@@ -83,9 +83,9 @@ pipeline test_assistant_methods(harness: Harness) {
   )
   assert_eq(calls[3].url, base + "/assistant.threads.setTitle", "setTitle URL")
   assert_eq(calls[0].headers.authorization, "[redacted]", "ephemeral auth redacted")
-  const status_body = json_parse(calls[1].body)
+  const status_body: {status: string} = json_parse(calls[1].body)
   assert_eq(status_body.status, "is thinking...", "setStatus body status")
-  const title_body = json_parse(calls[3].body)
+  const title_body: {title: string} = json_parse(calls[3].body)
   assert_eq(title_body.title, "Deploy chat", "setTitle body title")
   // assistant methods need an app/bot token like every other write method.
   const no_token = call(

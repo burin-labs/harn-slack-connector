@@ -33,7 +33,7 @@ pipeline test_socket_mode_smoke(harness: Harness) {
   const http_calls = harness.testing.http_mock_calls()
   assert_eq(http_calls[0].headers.authorization, "[redacted]", "app token header redacted")
   harness.testing.http_mock_clear()
-  const payload = json_parse(fixture_body(harness, "app_mention_channel_1"))
+  const payload = json_parse(fixture_body(harness.fs, "app_mention_channel_1"))
   const envelope = {
     envelope_id: "env-1",
     type: "events_api",
@@ -47,7 +47,7 @@ pipeline test_socket_mode_smoke(harness: Harness) {
   // Socket Mode is opt-in: callers must pass enable_socket_mode + an xapp- token.
   const conn_result = try {
     socket_mode_connect(
-      harness,
+      {net: harness.net, secrets: harness.secrets},
       {
         socket_url: "wss://socket.slack.test/app/test",
         timeout_ms: 0,
@@ -68,7 +68,7 @@ pipeline test_socket_mode_smoke(harness: Harness) {
   }
   const conn = unwrap(conn_result)
   assert_eq(conn.transport, "socket_mode", "socket mode transport")
-  const result = socket_mode_receive(harness, conn, {timeout_ms: 0})
+  const result = socket_mode_receive(harness.net, conn, {timeout_ms: 0})
   assert_eq(result.type, "event", "socket mode event result")
   assert_eq(result.envelope_id, "env-1", "socket mode envelope id")
   assert_eq(result.acked.acked, true, "socket mode ack flag")
@@ -79,7 +79,7 @@ pipeline test_socket_mode_smoke(harness: Harness) {
   const calls = harness.testing.transport_mock_calls()
   assert_eq(calls[0].kind, "websocket_connect", "socket mode opens websocket")
   assert_eq(calls[1].kind, "websocket_send", "socket mode sends ack")
-  const ack_body = json_parse(calls[1].data)
+  const ack_body: {envelope_id: string} = json_parse(calls[1].data)
   assert_eq(ack_body.envelope_id, "env-1", "socket mode ack envelope")
   harness.net.websocket_close(conn.socket)
   harness.testing.transport_mock_clear()

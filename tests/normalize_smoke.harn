@@ -9,9 +9,9 @@ import {
 
 pipeline test_normalize_smoke(harness: Harness) {
   const secret = "test-signing-secret"
-  const ts = fixture_ts(harness)
+  const ts = fixture_ts(harness.clock)
   assert_slack_interface(harness)
-  const url_body = fixture_body(harness, "url_verification")
+  const url_body = fixture_body(harness.fs, "url_verification")
   const url_result = normalize_inbound(harness, signed_raw(secret, url_body, ts))
   assert_eq(url_result.type, "immediate_response", "url verification result type")
   assert_eq(url_result.immediate_response.status, 200, "url verification status")
@@ -22,7 +22,7 @@ pipeline test_normalize_smoke(harness: Harness) {
     "url verification content type",
   )
   assert(url_result.event == nil, "url verification skips event")
-  const event_body = fixture_body(harness, "message_channel_1")
+  const event_body = fixture_body(harness.fs, "message_channel_1")
   const event_result = normalize_inbound(harness, signed_raw(secret, event_body, ts))
   assert_eq(event_result.type, "event", "event callback result type")
   assert_eq(event_result.event.kind, "message", "message event type")

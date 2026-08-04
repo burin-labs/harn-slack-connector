@@ -101,13 +101,19 @@ pipeline test_call_smoke(harness: Harness, task) {
   )
   const calls = harness.testing.http_mock_calls()
   assert_eq(len(calls), 14, "all required outbound methods dispatched")
-  const post_body = json_parse(calls[0].body)
-  const permalink_body = json_parse(calls[1].body)
-  const user_info_body = json_parse(calls[7].body)
-  const lookup_body = json_parse(calls[8].body)
-  const reaction_body = json_parse(calls[9].body)
-  const modal_body = json_parse(calls[12].body)
-  const socket_body = json_parse(calls[13].body)
+  const post_body: {text: string} = json_parse(calls[0].body)
+  const permalink_body: {
+    message_ts: string,
+    bot_token_secret?: string,
+    signing_secret?: string,
+    signing_secret_id?: string,
+    config?: dict,
+  } = json_parse(calls[1].body)
+  const user_info_body: {user: string, user_id?: string} = json_parse(calls[7].body)
+  const lookup_body: {email: string} = json_parse(calls[8].body)
+  const reaction_body: {name: string} = json_parse(calls[9].body)
+  const modal_body: {view: {type: string}} = json_parse(calls[12].body)
+  const socket_body: {app_token_secret?: string} = json_parse(calls[13].body)
   assert_eq(calls[0].method, "POST", "post uses POST")
   assert_eq(calls[0].url, base + "/chat.postMessage", "post URL")
   assert_eq(calls[0].headers.authorization, "[redacted]", "authorization header is redacted")
@@ -133,7 +139,7 @@ pipeline test_call_smoke(harness: Harness, task) {
   assert_eq(calls[13].url, base + "/apps.connections.open", "apps.connections.open URL")
   assert(socket_body.app_token_secret == nil, "app token secret id is not sent")
   const export_request = artifact_export_request(
-    harness,
+    harness.secrets,
     {api_base_url: base, bot_token: token, file_id: "F111", name: "report.pdf"},
   )
   assert_eq(export_request.kind, "artifact_export", "artifact export descriptor kind")
@@ -162,7 +168,7 @@ pipeline test_call_smoke(harness: Harness, task) {
   )
   assert_eq(direct_export.auth.secret, "slack/bot-token", "direct file export auth secret")
   const upload_import = artifact_import_request(
-    harness,
+    harness.secrets,
     {
       api_base_url: base,
       bot_token: token,
@@ -228,9 +234,12 @@ pipeline test_call_smoke(harness: Harness, task) {
       _harn: {disclosure: {slack: disclosure}},
     },
   )
-  const fallback_body = json_parse(
-    harness.testing.http_mock_calls({include_sensitive: true})[0].body,
-  )
+  const fallback_body: {
+    username?: string,
+    icon_emoji?: string,
+    text: string,
+    metadata: {event_payload: {harn: {ai_disclosure: {kind: string}}}},
+  } = json_parse(harness.testing.http_mock_calls({include_sensitive: true})[0].body)
   assert(fallback_body.username == nil, "custom username is stripped without chat:write.customize")
   assert(fallback_body.icon_emoji == nil, "custom icon is stripped without chat:write.customize")
   assert(
@@ -264,7 +273,12 @@ pipeline test_call_smoke(harness: Harness, task) {
       _harn: {disclosure: {slack: disclosure}},
     },
   )
-  const custom_body = json_parse(harness.testing.http_mock_calls({include_sensitive: true})[0].body)
+  const custom_body: {
+    text: string,
+    username: string,
+    icon_emoji: string,
+    metadata: {event_payload: {harn: {ai_disclosure: {surface: string}}}},
+  } = json_parse(harness.testing.http_mock_calls({include_sensitive: true})[0].body)
   assert_eq(custom_body.text, "ready", "customized messages keep caller text")
   assert_eq(custom_body.username, "Merge Captain", "custom username is sent with granted scope")
   assert_eq(custom_body.icon_emoji, ":robot_face:", "custom icon is sent with granted scope")

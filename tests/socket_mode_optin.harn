@@ -11,7 +11,7 @@ pipeline test_socket_mode_optin(harness: Harness) {
   shutdown(harness)
   // No enable flag at all: refused, and NO websocket opened.
   const disabled = socket_mode_connect(
-    harness,
+    {net: harness.net, secrets: harness.secrets},
     {socket_url: "wss://socket.slack.test/app/test", app_token: "xapp-test", timeout_ms: 0},
   )
   assert(is_err(disabled), "socket mode refuses without enable flag")
@@ -19,7 +19,7 @@ pipeline test_socket_mode_optin(harness: Harness) {
   assert_eq(len(harness.testing.transport_mock_calls()), 0, "no websocket opened when disabled")
   // Enabled but no xapp- token: refused (token gate).
   const no_token = socket_mode_connect(
-    harness,
+    {net: harness.net, secrets: harness.secrets},
     {
       socket_url: "wss://socket.slack.test/app/test",
       enable_socket_mode: true,
@@ -37,7 +37,7 @@ pipeline test_socket_mode_optin(harness: Harness) {
   )
   // A non-true enable value (e.g. a stray string) must NOT enable.
   const stringy = socket_mode_connect(
-    harness,
+    {net: harness.net, secrets: harness.secrets},
     {
       socket_url: "wss://socket.slack.test/app/test",
       enable_socket_mode: "true",

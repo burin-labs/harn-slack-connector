@@ -261,7 +261,12 @@ pub fn normalize_inbound(harness: Harness, raw) {
   }
   const body_text = to_string(body_candidate)
   const headers = raw?.headers ?? {}
-  const verified = __verify_slack_signature(harness, raw, headers, body_text)
+  const verified = __verify_slack_signature(
+    {clock: harness.clock, secrets: harness.secrets},
+    raw,
+    headers,
+    body_text,
+  )
   if is_err(verified) {
     return __reject(unwrap_err(verified), 403)
   }
@@ -316,15 +321,15 @@ pub fn normalize_inbound(harness: Harness, raw) {
  * connects only when Socket Mode is explicitly enabled AND an app-level
  * `xapp-` token is present; otherwise callers should use the HTTP Events path.
  */
-pub fn socket_mode_connect(harness: Harness, args = {}) {
-  const enabled = __socket_mode_enabled(harness, args ?? {})
+pub fn socket_mode_connect(harness: {net: HarnessNet, secrets: HarnessSecrets}, args = {}) {
+  const enabled = __socket_mode_enabled(harness.secrets, args ?? {})
   if is_err(enabled) {
     return enabled
   }
   const socket_url = args?.socket_url ?? args?.url
   let resolved_url = socket_url
   if resolved_url == nil || trim(to_string(resolved_url)) == "" {
-    const config = __socket_mode_config(harness, args ?? {})
+    const config = __socket_mode_config(harness.secrets, args ?? {})
     if is_err(config) {
       return config
     }
@@ -387,12 +392,12 @@ pub fn socket_mode_connect(harness: Harness, args = {}) {
 /**
  * Receive one Slack Socket Mode envelope, ack it immediately, and normalize its Events API payload.
  */
-pub fn socket_mode_receive(harness: Harness, connection, options = {}) {
+pub fn socket_mode_receive(harness: HarnessNet, connection, options = {}) {
   const socket = __socket_handle(connection)
   if socket == nil || trim(to_string(socket)) == "" {
     return __err("missing_socket", "Slack Socket Mode receive requires a socket handle")
   }
-  const message = harness.net.websocket_receive(socket, options?.timeout_ms ?? 1000)
+  const message = harness.websocket_receive(socket, options?.timeout_ms ?? 1000)
   if message == nil || message?.type == "timeout" || message?.type == "close" {
     return {type: message?.type ?? "closed", message: message}
   }
@@ -436,7 +441,7 @@ pub fn socket_mode_receive(harness: Harness, connection, options = {}) {
 }
 
 /** Ack a Slack Socket Mode envelope by id. */
-pub fn socket_mode_ack(harness: Harness, connection, envelope_id, payload = nil) {
+pub fn socket_mode_ack(harness: HarnessNet, connection, envelope_id, payload = nil) {
   const socket = __socket_handle(connection)
   if socket == nil || trim(to_string(socket)) == "" {
     return __err("missing_socket", "Slack Socket Mode ack requires a socket handle")
@@ -445,7 +450,7 @@ pub fn socket_mode_ack(harness: Harness, connection, envelope_id, payload = nil)
   if payload != nil {
     body["payload"] = payload
   }
-  harness.net.websocket_send(socket, json_stringify(body), {})
+  harness.websocket_send(socket, json_stringify(body), {})
   return {acked: true, envelope_id: envelope_id}
 }
 
@@ -461,21 +466,21 @@ pub fn call(harness: Harness, method, args = {}) {
     )
   }
   if slack_method == "artifact.export_request" {
-    return artifact_export_request(harness, args)
+    return artifact_export_request(harness.secrets, args)
   }
   if slack_method == "artifact.import_request" {
-    return artifact_import_request(harness, args)
+    return artifact_import_request(harness.secrets, args)
   }
   let cfg = nil
   if slack_method == "apps.connections.open" {
-    const config = __socket_mode_config(harness, args ?? {})
+    const config = __socket_mode_config(harness.secrets, args ?? {})
     if is_err(config) {
       return config
     }
     const socket_cfg = unwrap(config)
     cfg = {api_base_url: socket_cfg.api_base_url, bot_token: socket_cfg.app_token}
   } else {
-    const config = __outbound_config(harness, args ?? {})
+    const config = __outbound_config(harness.secrets, args ?? {})
     if is_err(config) {
       return config
     }
@@ -545,7 +550,7 @@ pub fn call(harness: Harness, method, args = {}) {
 }
 
 /** Build a deterministic Slack file export descriptor. */
-pub fn artifact_export_request(harness: Harness, args = {}) {
+pub fn artifact_export_request(harness: HarnessSecrets, args = {}) {
   const cfg = __outbound_config(harness, args ?? {})
   if is_err(cfg) {
     return cfg
@@ -627,7 +632,7 @@ pub fn artifact_export_request(harness: Harness, args = {}) {
 /**
  * Build deterministic Slack artifact import descriptors for file upload or remote-file registration.
  */
-pub fn artifact_import_request(harness: Harness, args = {}) {
+pub fn artifact_import_request(harness: HarnessSecrets, args = {}) {
   const cfg = __outbound_config(harness, args ?? {})
   if is_err(cfg) {
     return cfg
@@ -1157,7 +1162,7 @@ fn __slack_metrics(retry_info) {
   return {slack_retry_delivery: 0, slack_first_delivery: 1, slack_retry_num: 0}
 }
 
-fn __signing_secret(harness: Harness, raw) {
+fn __signing_secret(harness: HarnessSecrets, raw) {
   const direct = __first_secret_value(
     harness,
     [
@@ -1216,7 +1221,7 @@ fn __signing_secret(harness: Harness, raw) {
   return nil
 }
 
-fn __binding_signing_secret(harness: Harness, binding) {
+fn __binding_signing_secret(harness: HarnessSecrets, binding) {
   return __first_secret_value(
     harness,
     [
@@ -1296,7 +1301,7 @@ fn __binding_signing_secret_id(binding) {
   )
 }
 
-fn __first_secret_value(harness: Harness, candidates, fallback_id = nil) {
+fn __first_secret_value(harness: HarnessSecrets, candidates, fallback_id = nil) {
   for candidate in candidates ?? [] {
     const value = __secret_value_optional(harness, candidate, nil)
     if value != nil && trim(to_string(value)) != "" {
@@ -1323,7 +1328,7 @@ fn __secret_id_candidate(value) {
   return trim(to_string(value))
 }
 
-fn __secret_value_optional(harness: Harness, value, fallback_id = nil) {
+fn __secret_value_optional(harness: HarnessSecrets, value, fallback_id = nil) {
   if value != nil && trim(to_string(value)) != "" {
     const raw = trim(to_string(value))
     if contains(raw, "/") {
@@ -1337,12 +1342,12 @@ fn __secret_value_optional(harness: Harness, value, fallback_id = nil) {
   return __secret_get_optional(harness, fallback_id)
 }
 
-fn __secret_get_optional(harness: Harness, secret_id) {
+fn __secret_get_optional(harness: HarnessSecrets, secret_id) {
   if secret_id == nil || trim(to_string(secret_id)) == "" {
     return nil
   }
   const resolved = try {
-    harness.secrets.read(to_string(secret_id))
+    harness.read(to_string(secret_id))
   }
   if is_err(resolved) {
     return nil
@@ -1367,7 +1372,12 @@ fn __include_bot_messages(raw) {
   return state.ctx?.include_bot_messages ?? false
 }
 
-fn __verify_slack_signature(harness: Harness, raw, headers, body_text) {
+fn __verify_slack_signature(
+  harness: {clock: HarnessClock, secrets: HarnessSecrets},
+  raw,
+  headers,
+  body_text,
+) {
   const signature = __header(headers, "x-slack-signature")
   if signature == nil || signature == "" {
     return __err("missing_signature", "missing x-slack-signature header")
@@ -1396,7 +1406,7 @@ fn __verify_slack_signature(harness: Harness, raw, headers, body_text) {
       "x-slack-request-timestamp is outside the allowed 5 minute verification window",
     )
   }
-  const secret = __signing_secret(harness, raw)
+  const secret = __signing_secret(harness.secrets, raw)
   if secret == nil || trim(to_string(secret)) == "" {
     return __err("missing_secret", "slack signing_secret is required")
   }
@@ -2724,7 +2734,7 @@ fn __slack_query(fields) {
   return "?" + query_stringify(query)
 }
 
-fn __outbound_config(harness: Harness, args) {
+fn __outbound_config(harness: HarnessSecrets, args) {
   const api_base_url_check = __validate_api_base_url(args?.api_base_url)
   if is_err(api_base_url_check) {
     return api_base_url_check
@@ -2752,7 +2762,7 @@ fn __outbound_config(harness: Harness, args) {
  * app-level `xapp-` token is resolvable. Returns Ok(true) when allowed, or an
  * __err describing why the connector stays on the HTTP Events path.
  */
-fn __socket_mode_enabled(harness: Harness, args) {
+fn __socket_mode_enabled(harness: HarnessSecrets, args) {
   if !__socket_mode_enable_flag(args) {
     return __err(
       "socket_mode_disabled",
@@ -2807,7 +2817,7 @@ fn __is_true(value) {
   }
 }
 
-fn __socket_mode_config(harness: Harness, args) {
+fn __socket_mode_config(harness: HarnessSecrets, args) {
   const api_base_url_check = __validate_api_base_url(args?.api_base_url)
   if is_err(api_base_url_check) {
     return api_base_url_check
@@ -2833,7 +2843,7 @@ fn __socket_handle(connection) {
   return connection?.socket ?? connection?.id ?? connection
 }
 
-fn __socket_mode_ack(harness: Harness, socket, envelope) {
+fn __socket_mode_ack(harness: HarnessNet, socket, envelope) {
   const envelope_id = envelope?.envelope_id
   if envelope_id == nil || trim(to_string(envelope_id)) == "" {
     return {acked: false, envelope_id: nil}
