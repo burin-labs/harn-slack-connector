@@ -17,8 +17,8 @@ import {
  * timestamp rather than a hard-coded value. Slack request timestamps are
  * always whole seconds, so we truncate the float here.
  */
-pub fn fixture_ts(harness: HarnessClock) {
-  return to_int(harness.timestamp())
+pub fn fixture_ts(clock: HarnessClock) {
+  return to_int(clock.timestamp())
 }
 
 /** Build signed Slack request headers for fixture webhook bodies. */
@@ -57,13 +57,13 @@ pub fn signed_form_raw(secret, body, ts, extra = nil) {
 }
 
 /** Read a Slack webhook fixture body by basename. */
-pub fn fixture_body(harness: HarnessFs, name) {
-  return harness.read_text(harness.source_dir() + "/fixtures/webhooks/" + name + ".json")
+pub fn fixture_body(fs: HarnessFs, name) {
+  return fs.read_text(fs.source_dir() + "/fixtures/webhooks/" + name + ".json")
 }
 
 /** Build a signed raw Events API request for a named webhook fixture. */
-pub fn fixture_raw(harness: HarnessFs, name, secret, ts, extra = nil) {
-  return signed_raw(secret, fixture_body(harness, name), ts, extra)
+pub fn fixture_raw(fs: HarnessFs, name, secret, ts, extra = nil) {
+  return signed_raw(secret, fixture_body(fs, name), ts, extra)
 }
 
 fn method_policy_by_name(methods, name) {
