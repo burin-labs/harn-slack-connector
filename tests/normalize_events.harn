@@ -10,8 +10,8 @@ fn assert_event(
   expected_text,
 ) {
   const secret = "event-secret"
-  const ts = fixture_ts(harness)
-  const result = normalize_inbound(harness, fixture_raw(harness, name, secret, ts))
+  const ts = fixture_ts(harness.clock)
+  const result = normalize_inbound(harness, fixture_raw(harness.fs, name, secret, ts))
   require result.type == "event", name + " result type"
   require result.event.kind == expected_type, name + " kind"
   require result.event.dedupe_key == "slack:event:" + result.event.payload.event_id,
@@ -110,8 +110,8 @@ pipeline test_normalize_events(harness: Harness) {
     "",
   )
   const secret = "event-secret"
-  const ts = fixture_ts(harness)
-  const ignored_bot = normalize_inbound(harness, fixture_raw(harness, "message_bot", secret, ts))
+  const ts = fixture_ts(harness.clock)
+  const ignored_bot = normalize_inbound(harness, fixture_raw(harness.fs, "message_bot", secret, ts))
   assert_eq(ignored_bot.type, "immediate_response", "bot message ack type")
   assert_eq(ignored_bot.immediate_response.status, 200, "bot message ack")
   assert(ignored_bot.event == nil, "bot messages are ignored by default")
@@ -119,7 +119,10 @@ pipeline test_normalize_events(harness: Harness) {
   // attacker-controlled raw envelope. Opt in via init ctx for this assertion.
   shutdown(harness)
   init(harness, {include_bot_messages: true})
-  const included_bot = normalize_inbound(harness, fixture_raw(harness, "message_bot", secret, ts))
+  const included_bot = normalize_inbound(
+    harness,
+    fixture_raw(harness.fs, "message_bot", secret, ts),
+  )
   assert_eq(included_bot.type, "event", "bot opt-in result type")
   assert_eq(included_bot.event.kind, "message", "bot opt-in event type")
   assert_eq(included_bot.event.payload.text, "bot echo", "bot opt-in text")
@@ -127,7 +130,7 @@ pipeline test_normalize_events(harness: Harness) {
   shutdown(harness)
   const raw_opt_in = normalize_inbound(
     harness,
-    fixture_raw(harness, "message_bot", secret, ts, {include_bot_messages: true}),
+    fixture_raw(harness.fs, "message_bot", secret, ts, {include_bot_messages: true}),
   )
   assert_eq(raw_opt_in.type, "immediate_response", "raw envelope cannot enable bot opt-in")
   assert(raw_opt_in.event == nil, "raw envelope include_bot_messages ignored")
