@@ -1,3 +1,4 @@
+import { schema_any, schema_dict } from "std/schema"
 import { eval_verdict_post_message_payload, post_eval_verdict } from "../src/lib"
 
 pipeline test_eval_verdict_post_message_payload(task) {
@@ -40,12 +41,7 @@ pipeline test_post_eval_verdict_smoke(harness: Harness, task) {
   const calls = harness.testing.http_mock_calls()
   assert_eq(len(calls), 1, "one Slack Web API call")
   assert_eq(calls[0].url, base + "/chat.postMessage", "postMessage URL")
-  const body: {
-    channel: string,
-    text: string,
-    blocks: list<{fields: list<{text: string}>}>,
-    bot_token?: string,
-  } = json_parse(calls[0].body)
+  const body = schema_expect(json_parse(calls[0].body), schema_dict(schema_any()))
   assert_eq(body.channel, "C111", "channel posted")
   assert(contains(body.text, "Eval regression detected"), "formatted digest posted")
   const paired_ci_field = (body.blocks[1]?.fields ?? [])[4]?.text ?? ""
