@@ -203,13 +203,13 @@ pub fn init(harness: Harness, ctx = nil) {
   const current = __state()
   const next = current
     + {
-    initialized: true,
-    ctx: if type_of(ctx) == "dict" {
-      ctx
-    } else {
-      {}
-    },
-  }
+      initialized: true,
+      ctx: if type_of(ctx) == "dict" {
+        ctx
+      } else {
+        {}
+      },
+    }
   __set_state(next)
   return next
 }
@@ -362,9 +362,7 @@ pub fn socket_mode_connect(harness: {net: HarnessNet, secrets: HarnessSecrets}, 
         "slack_error",
         payload?.error
           ?? ("Slack apps.connections.open failed with status "
-          + to_string(
-          http_response.status,
-        )),
+            + to_string(http_response.status)),
       )
     }
     resolved_url = payload?.url
@@ -559,13 +557,12 @@ pub fn artifact_export_request(secrets: HarnessSecrets, args = {}) {
   const file = args?.file ?? {}
   const file_id = args?.file_id ?? file?.id
     ?? if type_of(file) == "string" {
-    file
-  } else {
-    nil
-  }
+      file
+    } else {
+      nil
+    }
   const direct_url = args?.url_private_download ?? args?.url_private ?? args?.download_url
-    ?? args
-    ?.file_url
+    ?? args?.file_url
     ?? args?.url
     ?? file?.url_private_download
     ?? file?.url_private
@@ -664,17 +661,17 @@ pub fn artifact_import_request(secrets: HarnessSecrets, args = {}) {
     if args?.channel_id != nil || args?.channels != nil {
       steps = steps
         + [
-        {
-          id: "files_remote_share",
-          method: "POST",
-          url: __slack_api_url(slack_cfg.api_base_url, "files.remote.share"),
-          body: {
-            external_id: to_string(external_id),
-            channel: args?.channel_id ?? args?.channel,
-            channels: args?.channels,
+          {
+            id: "files_remote_share",
+            method: "POST",
+            url: __slack_api_url(slack_cfg.api_base_url, "files.remote.share"),
+            body: {
+              external_id: to_string(external_id),
+              channel: args?.channel_id ?? args?.channel,
+              channels: args?.channels,
+            },
           },
-        },
-      ]
+        ]
     }
     return {
       provider: SLACK_PROVIDER_ID,
@@ -906,10 +903,7 @@ fn __apply_slack_textual_byline(body, disclosure) {
   }
   let out = __prepend_slack_text(body, byline)
   if type_of(out?.blocks) == "list" && len(out.blocks) > 0
-    && !__slack_blocks_contain_text(
-    out.blocks,
-    byline,
-  ) {
+    && !__slack_blocks_contain_text(out.blocks, byline) {
     out["blocks"] = [__slack_byline_block(byline)] + out.blocks
   }
   return out
@@ -991,13 +985,13 @@ pub fn eval_verdict_post_message_payload(verdict, options = nil) {
   const summary = __eval_verdict_summary(verdict)
   let payload = opts
     + {
-    channel: channel,
-    text: title + "\n" + summary,
-    blocks: [
-      {type: "section", text: {type: "mrkdwn", text: "*" + title + "*\n" + summary}},
-      {type: "section", fields: __eval_verdict_fields(verdict)},
-    ],
-  }
+      channel: channel,
+      text: title + "\n" + summary,
+      blocks: [
+        {type: "section", text: {type: "mrkdwn", text: "*" + title + "*\n" + summary}},
+        {type: "section", fields: __eval_verdict_fields(verdict)},
+      ],
+    }
   const cases = __eval_verdict_case_lines(
     verdict?.top_regressed_cases ?? verdict?.regressed_cases ?? [],
     5,
@@ -1589,8 +1583,7 @@ fn __normalize_event_callback(payload, raw) {
   if event_type == "assistant_thread_started" {
     const assistant_thread = event?.assistant_thread ?? {}
     const channel = assistant_thread?.channel_id ?? assistant_thread?.context?.channel_id
-      ?? event
-      ?.channel
+      ?? event?.channel
       ?? ""
     const thread_ts = assistant_thread?.thread_ts ?? event?.event_ts
     const resource_id = channel + "/" + to_string(thread_ts ?? "")
@@ -1630,8 +1623,7 @@ fn __normalize_event_callback(payload, raw) {
   if event_type == "assistant_thread_context_changed" {
     const assistant_thread = event?.assistant_thread ?? {}
     const channel = assistant_thread?.channel_id ?? assistant_thread?.context?.channel_id
-      ?? event
-      ?.channel
+      ?? event?.channel
       ?? ""
     const thread_ts = assistant_thread?.thread_ts ?? event?.event_ts
     const resource_id = channel + "/" + to_string(thread_ts ?? "")
@@ -1768,9 +1760,7 @@ fn __normalize_slash_command(fields, raw) {
   }
   const normalized_payload = __payload_with_normalized_fields(envelope, normalized, raw, dedupe_key)
   const payload = normalized_payload
-    + {
-    agent_summon: __agent_summon(normalized, normalized_payload?.source, "slash_command"),
-  }
+    + {agent_summon: __agent_summon(normalized, normalized_payload?.source, "slash_command")}
   return {
     type: "event",
     event: __event_result(
@@ -1813,9 +1803,7 @@ fn __normalize_interactivity(payload_json, raw) {
     "slack:interactivity:" + to_string(payload.trigger_id)
   } else {
     "slack:interactivity:" + to_string(team_id ?? "unknown-team") + ":" + channel + ":"
-      + to_string(
-      resource_base,
-    )
+      + to_string(resource_base)
   }
   const normalized = {
     provider: SLACK_PROVIDER_ID,
@@ -1987,12 +1975,7 @@ fn __payload_with_normalized_fields(payload, normalized, raw = nil, dedupe_key =
   const source_refs = __slack_source_refs(normalized, source)
   const triage = __slack_triage_source(normalized, source, source_refs, dedupe_key)
   let result = base + normalized
-    + {
-    source: source,
-    source_refs: source_refs,
-    triage: triage,
-    provider_raw: provider_raw,
-  }
+    + {source: source, source_refs: source_refs, triage: triage, provider_raw: provider_raw}
   const summon_trigger = __agent_summon_trigger_kind(
     normalized?.event_type,
     normalized?.channel_type,
@@ -2007,11 +1990,9 @@ fn __payload_with_normalized_fields(payload, normalized, raw = nil, dedupe_key =
 fn __slack_source(normalized, envelope, delivery_dedupe_key) {
   const event = normalized?.raw ?? {}
   const team_id = envelope?.team_id ?? event?.team ?? event?.team_id
-    ?? event?.assistant_thread?.context
-    ?.team_id
+    ?? event?.assistant_thread?.context?.team_id
   const enterprise_id = envelope?.enterprise_id ?? event?.enterprise_id
-    ?? event?.assistant_thread
-    ?.context?.enterprise_id
+    ?? event?.assistant_thread?.context?.enterprise_id
   const channel = normalized?.channel ?? ""
   const message_ts = normalized?.message_ts
   const thread_ts = normalized?.thread_ts
@@ -2113,10 +2094,7 @@ fn __slack_source_refs(normalized, source) {
   const channel = source?.channel_id
   if channel != nil && channel != "" {
     const conversation_kind = if normalized?.channel_type == "im"
-      || starts_with(
-      to_string(channel),
-      "D",
-    ) {
+      || starts_with(to_string(channel), "D") {
       "direct_message"
     } else {
       "channel"
@@ -2157,8 +2135,7 @@ fn __slack_source_refs(normalized, source) {
   }
   const item = normalized?.raw?.item ?? {}
   const file_id = item?.file ?? normalized?.file_id ?? normalized?.raw?.file_id
-    ?? normalized?.raw?.file
-    ?.id
+    ?? normalized?.raw?.file?.id
   if file_id != nil && file_id != "" {
     refs = refs.push(
       {
@@ -2294,10 +2271,7 @@ fn __slack_privacy(normalized) {
     flags: flags,
     raw_payload_present: true,
     may_contain_user_content: contains(flags, "contains_message_text")
-      || contains(
-      flags,
-      "contains_file_ref",
-    ),
+      || contains(flags, "contains_file_ref"),
   }
 }
 
@@ -2333,9 +2307,7 @@ fn __slack_action_intents(normalized, source) {
 fn __slack_triage_summary(normalized) {
   if normalized?.event_type == "reaction_added" {
     return "Reaction `" + to_string(normalized?.reaction ?? "") + "` on Slack "
-      + to_string(
-      normalized?.item_type ?? "item",
-    )
+      + to_string(normalized?.item_type ?? "item")
   }
   const text = trim(to_string(normalized?.text ?? ""))
   if text != "" {
@@ -2385,18 +2357,16 @@ fn __eval_verdict_summary(verdict) {
   const gate = verdict?.gate ?? {}
   return "Macro pass@1 "
     + __format_percent(
-    __first_present([verdict?.macro_pass_at_1, gate?.current_macro, paired?.current_macro]),
-  )
+      __first_present([verdict?.macro_pass_at_1, gate?.current_macro, paired?.current_macro]),
+    )
     + " vs baseline "
     + __format_percent(
-    __first_present(
-      [verdict?.baseline_macro_pass_at_1, gate?.baseline_macro, paired?.baseline_macro],
-    ),
-  )
+      __first_present(
+        [verdict?.baseline_macro_pass_at_1, gate?.baseline_macro, paired?.baseline_macro],
+      ),
+    )
     + "; paired delta "
-    + __format_delta(
-    __first_present([paired?.mean_delta, verdict?.paired_delta_mean]),
-  )
+    + __format_delta(__first_present([paired?.mean_delta, verdict?.paired_delta_mean]))
     + " (95% CI "
     + __format_delta(__first_present([paired?.ci_lo, verdict?.paired_delta_ci_lo]))
     + " to "
@@ -2417,22 +2387,18 @@ fn __eval_verdict_fields(verdict) {
       type: "mrkdwn",
       text: "*Macro pass@1*\n"
         + __format_percent(
-        __first_present([verdict?.macro_pass_at_1, gate?.current_macro, paired?.current_macro]),
-      ),
+          __first_present([verdict?.macro_pass_at_1, gate?.current_macro, paired?.current_macro]),
+        ),
     },
     {
       type: "mrkdwn",
       text: "*Gate threshold*\n"
-        + __format_percent(
-        __first_present([gate?.threshold, paired?.regression_threshold]),
-      ),
+        + __format_percent(__first_present([gate?.threshold, paired?.regression_threshold])),
     },
     {
       type: "mrkdwn",
       text: "*Paired delta*\n"
-        + __format_delta(
-        __first_present([paired?.mean_delta, verdict?.paired_delta_mean]),
-      )
+        + __format_delta(__first_present([paired?.mean_delta, verdict?.paired_delta_mean]))
         + " ["
         + __format_delta(__first_present([paired?.ci_lo, verdict?.paired_delta_ci_lo]))
         + ", "
@@ -2537,9 +2503,7 @@ fn __slack_source_dedupe_key(source_kind, team_id, channel, message_ts, normaliz
   const team = __slack_team_part(team_id)
   if source_kind == "reaction" || source_kind == "file_reaction" {
     return "slack:reaction:" + team + ":" + to_string(channel ?? "") + ":"
-      + to_string(
-      message_ts ?? "",
-    )
+      + to_string(message_ts ?? "")
       + ":"
       + to_string(normalized?.reaction ?? "")
       + ":"
@@ -2547,24 +2511,18 @@ fn __slack_source_dedupe_key(source_kind, team_id, channel, message_ts, normaliz
   }
   if source_kind == "file" {
     return "slack:file:" + team + ":"
-      + to_string(
-      normalized?.file_id ?? normalized?.resource_id ?? "unknown",
-    )
+      + to_string(normalized?.file_id ?? normalized?.resource_id ?? "unknown")
   }
   if channel != nil && channel != "" && message_ts != nil && message_ts != "" {
     return "slack:message:" + team + ":" + to_string(channel) + ":" + to_string(message_ts)
   }
   return "slack:" + to_string(source_kind) + ":" + team + ":"
-    + to_string(
-    normalized?.resource_id ?? "unknown",
-  )
+    + to_string(normalized?.resource_id ?? "unknown")
 }
 
 fn __slack_ref_id(kind, team_id, id) {
   return "slack:" + to_string(kind) + ":" + __slack_team_part(team_id) + ":"
-    + to_string(
-    id ?? "unknown",
-  )
+    + to_string(id ?? "unknown")
 }
 
 fn __slack_team_part(team_id) {
@@ -2611,43 +2569,43 @@ fn __slack_channel_url(team_id, channel) {
 fn __slack_channel_deep_link(team_id, channel) {
   if channel == nil || trim(to_string(channel)) == "" || team_id == nil
     || trim(to_string(team_id))
-    == "" {
+      == "" {
     return nil
   }
   return "slack://channel?"
     + query_stringify(
-    [{key: "team", value: to_string(team_id)}, {key: "id", value: to_string(channel)}],
-  )
+      [{key: "team", value: to_string(team_id)}, {key: "id", value: to_string(channel)}],
+    )
 }
 
 fn __slack_member_deep_link(team_id, user_id) {
   if user_id == nil || trim(to_string(user_id)) == "" || team_id == nil
     || trim(to_string(team_id))
-    == "" {
+      == "" {
     return nil
   }
   return "slack://user?"
     + query_stringify(
-    [{key: "team", value: to_string(team_id)}, {key: "id", value: to_string(user_id)}],
-  )
+      [{key: "team", value: to_string(team_id)}, {key: "id", value: to_string(user_id)}],
+    )
 }
 
 fn __slack_file_deep_link(team_id, file_id) {
   if file_id == nil || trim(to_string(file_id)) == "" || team_id == nil
     || trim(to_string(team_id))
-    == "" {
+      == "" {
     return nil
   }
   return "slack://file?"
     + query_stringify(
-    [{key: "team", value: to_string(team_id)}, {key: "id", value: to_string(file_id)}],
-  )
+      [{key: "team", value: to_string(team_id)}, {key: "id", value: to_string(file_id)}],
+    )
 }
 
 fn __slack_app_home_deep_link(team_id, app_id, tab = nil) {
   if app_id == nil || trim(to_string(app_id)) == "" || team_id == nil
     || trim(to_string(team_id))
-    == "" {
+      == "" {
     return nil
   }
   let query = [{key: "team", value: to_string(team_id)}, {key: "id", value: to_string(app_id)}]
@@ -2659,10 +2617,8 @@ fn __slack_app_home_deep_link(team_id, app_id, tab = nil) {
 
 fn __slack_permalink_request(channel, message_ts) {
   if channel == nil || trim(to_string(channel)) == "" || message_ts == nil
-    || trim(
-    to_string(message_ts),
-  )
-    == "" {
+    || trim(to_string(message_ts))
+      == "" {
     return nil
   }
   return {
@@ -2746,9 +2702,9 @@ fn __outbound_config(secrets: HarnessSecrets, args) {
     nil,
   )
     ?? __secret_get_optional(
-    secrets,
-    __first_secret_id([args?.bot_token_secret, args?.secrets?.bot_token_secret]),
-  )
+      secrets,
+      __first_secret_id([args?.bot_token_secret, args?.secrets?.bot_token_secret]),
+    )
     ?? __secret_get_optional(secrets, "slack/bot-token")
   if bot_token == nil || trim(to_string(bot_token)) == "" {
     return __err("missing_bot_token", "slack connector requires bot_token")
@@ -2798,8 +2754,7 @@ fn __socket_mode_enable_flag(args) {
   if binding_id != nil {
     const binding = bindings.get(binding_id)
     const from_binding = binding?.enable_socket_mode ?? binding?.socket_mode?.enabled
-      ?? binding?.config
-      ?.enable_socket_mode
+      ?? binding?.config?.enable_socket_mode
       ?? binding?.config?.socket_mode?.enabled
     if from_binding != nil {
       return __is_true(from_binding)
@@ -2829,9 +2784,9 @@ fn __socket_mode_config(secrets: HarnessSecrets, args) {
     nil,
   )
     ?? __secret_get_optional(
-    secrets,
-    __first_secret_id([args?.app_token_secret, args?.secrets?.app_token_secret]),
-  )
+      secrets,
+      __first_secret_id([args?.app_token_secret, args?.secrets?.app_token_secret]),
+    )
     ?? __secret_get_optional(secrets, "slack/app-token")
   if app_token == nil || trim(to_string(app_token)) == "" {
     return __err("missing_app_token", "Slack Socket Mode requires app_token")

@@ -54,10 +54,7 @@ pipeline test_normalize_smoke(harness: Harness) {
       ts,
       {
         headers: slack_headers(secret, event_body, ts)
-          + {
-          "x-slack-retry-num": "1",
-          "x-slack-retry-reason": "http_timeout",
-        },
+          + {"x-slack-retry-num": "1", "x-slack-retry-reason": "http_timeout"},
       },
     ),
   )
