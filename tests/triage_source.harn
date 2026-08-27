@@ -1,7 +1,7 @@
 import { normalize_inbound, shutdown } from "../src/lib"
 import { fixture_raw, fixture_ts } from "./helpers"
 
-fn ref_by_kind(refs, kind) {
+fn ref_by_kind(refs: any, kind: any) {
   for ref in refs {
     if ref.kind == kind {
       return ref

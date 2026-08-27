@@ -1,11 +1,11 @@
 import { call, shutdown, socket_mode_connect, socket_mode_receive } from "../src/lib"
 import { fixture_body } from "./helpers"
 
-fn __is_sandbox_restriction(error) {
+fn __is_sandbox_restriction(error: any) {
   return error_is(error, "tool_rejected")
 }
 
-pipeline test_socket_mode_sandbox_restriction_classification(task) {
+pipeline test_socket_mode_sandbox_restriction_classification(task: any) {
   const restricted = {category: "tool_rejected", message: "sandbox wording may change"}
   assert(__is_sandbox_restriction(restricted), "structured sandbox restriction recognized")
   const unrelated = {category: "transient_network", message: "network ceiling"}

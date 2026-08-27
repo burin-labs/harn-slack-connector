@@ -1,6 +1,6 @@
 import { artifact_export_request, artifact_import_request, call, init, shutdown } from "../src/lib"
 
-pipeline test_init_context_boundary(harness: Harness, task) {
+pipeline test_init_context_boundary(harness: Harness, task: any) {
   shutdown(harness)
   const normalized = init(harness, "invalid-context")
   assert_eq(normalized.ctx, {}, "non-dict init context is normalized")
@@ -9,7 +9,7 @@ pipeline test_init_context_boundary(harness: Harness, task) {
   shutdown(harness)
 }
 
-pipeline test_call_smoke(harness: Harness, task) {
+pipeline test_call_smoke(harness: Harness, task: any) {
   harness.net.egress_policy({allow: ["api.slack.com"], default: "deny"})
   harness.testing.http_mock_clear()
   // F8: api_base_url is allowlisted to {slack.com, api.slack.com}; tests must

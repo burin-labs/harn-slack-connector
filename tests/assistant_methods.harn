@@ -1,6 +1,6 @@
 import { call, outbound_methods } from "../src/lib"
 
-fn method_policy(methods, name) {
+fn method_policy(methods: any, name: any) {
   for policy in methods {
     if policy.method == name {
       return policy

@@ -1,7 +1,7 @@
 import { schema_any, schema_dict } from "std/schema"
 import { eval_verdict_post_message_payload, post_eval_verdict } from "../src/lib"
 
-pipeline test_eval_verdict_post_message_payload(task) {
+pipeline test_eval_verdict_post_message_payload(task: any) {
   const verdict = sample_verdict()
   const payload = eval_verdict_post_message_payload(
     verdict,
@@ -19,7 +19,7 @@ pipeline test_eval_verdict_post_message_payload(task) {
   assert_eq(unwrap_err(missing_channel).code, "missing_channel", "missing channel code")
 }
 
-pipeline test_post_eval_verdict_smoke(harness: Harness, task) {
+pipeline test_post_eval_verdict_smoke(harness: Harness, task: any) {
   harness.net.egress_policy({allow: ["api.slack.com"], default: "deny"})
   harness.testing.http_mock_clear()
   const base = "https://api.slack.com"

@@ -3,11 +3,11 @@ import { fixture_raw, fixture_ts } from "./helpers"
 
 fn assert_event(
   harness: Harness,
-  name,
-  expected_type,
-  expected_resource,
-  expected_user,
-  expected_text,
+  name: any,
+  expected_type: any,
+  expected_resource: any,
+  expected_user: any,
+  expected_text: any,
 ) {
   const secret = "event-secret"
   const ts = fixture_ts(harness.clock)
