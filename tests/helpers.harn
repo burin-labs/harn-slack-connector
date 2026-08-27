@@ -22,7 +22,7 @@ pub fn fixture_ts(clock: HarnessClock) {
 }
 
 /** Build signed Slack request headers for fixture webhook bodies. */
-pub fn slack_headers(secret, body, ts) {
+pub fn slack_headers(secret: any, body: any, ts: any) {
   const basestring = "v0:" + to_string(ts) + ":" + body
   return {
     "x-slack-request-timestamp": to_string(ts),
@@ -36,7 +36,7 @@ pub fn slack_headers(secret, body, ts) {
  * After F10 the connector ignores `raw.now`/`raw.received_at` and uses the
  * trusted clock, so this builder no longer plants those fields.
  */
-pub fn signed_raw(secret, body, ts, extra = nil) {
+pub fn signed_raw(secret: any, body: any, ts: any, extra: any = nil) {
   const raw = {signing_secret: secret, body_text: body, headers: slack_headers(secret, body, ts)}
   return raw + (extra ?? {})
 }
@@ -46,7 +46,7 @@ pub fn signed_raw(secret, body, ts, extra = nil) {
  * commands and interactivity payloads). Slack signs the raw body the same way
  * as the Events API, so we reuse `slack_headers` and add the form content-type.
  */
-pub fn signed_form_raw(secret, body, ts, extra = nil) {
+pub fn signed_form_raw(secret: any, body: any, ts: any, extra: any = nil) {
   const raw = {
     signing_secret: secret,
     body_text: body,
@@ -57,16 +57,16 @@ pub fn signed_form_raw(secret, body, ts, extra = nil) {
 }
 
 /** Read a Slack webhook fixture body by basename. */
-pub fn fixture_body(fs: HarnessFs, name) {
+pub fn fixture_body(fs: HarnessFs, name: any) {
   return fs.read_text(fs.source_dir() + "/fixtures/webhooks/" + name + ".json")
 }
 
 /** Build a signed raw Events API request for a named webhook fixture. */
-pub fn fixture_raw(fs: HarnessFs, name, secret, ts, extra = nil) {
+pub fn fixture_raw(fs: HarnessFs, name: any, secret: any, ts: any, extra: any = nil) {
   return signed_raw(secret, fixture_body(fs, name), ts, extra)
 }
 
-fn method_policy_by_name(methods, name) {
+fn method_policy_by_name(methods: any, name: any) {
   for method in methods {
     if method.method == name {
       return method

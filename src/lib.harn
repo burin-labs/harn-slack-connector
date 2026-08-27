@@ -199,7 +199,7 @@ pub fn payload_schema() {
 }
 
 /** Initialize connector state with orchestrator context. */
-pub fn init(harness: Harness, ctx = nil) {
+pub fn init(harness: Harness, ctx: any = nil) {
   const current = __state()
   const next = current
     + {
@@ -215,7 +215,7 @@ pub fn init(harness: Harness, ctx = nil) {
 }
 
 /** Activate webhook bindings and reject duplicate configured paths. */
-pub fn activate(harness: Harness, bindings = []) {
+pub fn activate(harness: Harness, bindings: any = []) {
   let by_id = {}
   let seen_paths = {}
   for binding in bindings ?? [] {
@@ -251,7 +251,7 @@ pub fn shutdown(harness: Harness) {
  * Slack requires a 200 response within 3 seconds. Keep this function CPU-only:
  * verify HMAC, parse JSON, return immediate_response, and never perform HTTP.
  */
-pub fn normalize_inbound(harness: Harness, raw) {
+pub fn normalize_inbound(harness: Harness, raw: any) {
   const body_candidate = raw?.body_text ?? raw?.body
   if body_candidate == nil || to_string(body_candidate) == "" {
     return __reject(
@@ -321,7 +321,7 @@ pub fn normalize_inbound(harness: Harness, raw) {
  * connects only when Socket Mode is explicitly enabled AND an app-level
  * `xapp-` token is present; otherwise callers should use the HTTP Events path.
  */
-pub fn socket_mode_connect(harness: {net: HarnessNet, secrets: HarnessSecrets}, args = {}) {
+pub fn socket_mode_connect(harness: {net: HarnessNet, secrets: HarnessSecrets}, args: any = {}) {
   const enabled = __socket_mode_enabled(harness.secrets, args ?? {})
   if is_err(enabled) {
     return enabled
@@ -390,7 +390,7 @@ pub fn socket_mode_connect(harness: {net: HarnessNet, secrets: HarnessSecrets}, 
 /**
  * Receive one Slack Socket Mode envelope, ack it immediately, and normalize its Events API payload.
  */
-pub fn socket_mode_receive(net: HarnessNet, connection, options = {}) {
+pub fn socket_mode_receive(net: HarnessNet, connection: any, options: any = {}) {
   const socket = __socket_handle(connection)
   if socket == nil || trim(to_string(socket)) == "" {
     return __err("missing_socket", "Slack Socket Mode receive requires a socket handle")
@@ -439,7 +439,7 @@ pub fn socket_mode_receive(net: HarnessNet, connection, options = {}) {
 }
 
 /** Ack a Slack Socket Mode envelope by id. */
-pub fn socket_mode_ack(net: HarnessNet, connection, envelope_id, payload = nil) {
+pub fn socket_mode_ack(net: HarnessNet, connection: any, envelope_id: any, payload: any = nil) {
   const socket = __socket_handle(connection)
   if socket == nil || trim(to_string(socket)) == "" {
     return __err("missing_socket", "Slack Socket Mode ack requires a socket handle")
@@ -454,7 +454,7 @@ pub fn socket_mode_ack(net: HarnessNet, connection, envelope_id, payload = nil) 
 
 @complexity(allow)
 /** Dispatch a supported Slack Web API method with JSON body semantics. */
-pub fn call(harness: Harness, method, args = {}) {
+pub fn call(harness: Harness, method: any, args: any = {}) {
   const slack_method = __canonical_outbound_method(method)
   const method_policy = __outbound_method_policy(slack_method)
   if method_policy == nil {
@@ -548,7 +548,7 @@ pub fn call(harness: Harness, method, args = {}) {
 }
 
 /** Build a deterministic Slack file export descriptor. */
-pub fn artifact_export_request(secrets: HarnessSecrets, args = {}) {
+pub fn artifact_export_request(secrets: HarnessSecrets, args: any = {}) {
   const cfg = __outbound_config(secrets, args ?? {})
   if is_err(cfg) {
     return cfg
@@ -629,7 +629,7 @@ pub fn artifact_export_request(secrets: HarnessSecrets, args = {}) {
 /**
  * Build deterministic Slack artifact import descriptors for file upload or remote-file registration.
  */
-pub fn artifact_import_request(secrets: HarnessSecrets, args = {}) {
+pub fn artifact_import_request(secrets: HarnessSecrets, args: any = {}) {
   const cfg = __outbound_config(secrets, args ?? {})
   if is_err(cfg) {
     return cfg
@@ -759,7 +759,7 @@ pub fn artifact_import_request(secrets: HarnessSecrets, args = {}) {
   )
 }
 
-fn __decode_slack_response(method, response) {
+fn __decode_slack_response(method: any, response: any) {
   if is_err(response) {
     return __err("transport", to_string(unwrap_err(response)))
   }
@@ -786,7 +786,7 @@ fn __decode_slack_response(method, response) {
   return payload
 }
 
-fn __canonical_outbound_method(method) {
+fn __canonical_outbound_method(method: any) {
   const aliases = {
     post_message: "chat.postMessage",
     update_message: "chat.update",
@@ -800,7 +800,7 @@ fn __canonical_outbound_method(method) {
   return aliases.get(method) ?? method
 }
 
-fn __apply_slack_outbound_disclosure(method, body, args) {
+fn __apply_slack_outbound_disclosure(method: any, body: any, args: any) {
   const disclosure = __slack_message_disclosure(args)
   let out = __strip_ungranted_slack_custom_identity(method, body, args, disclosure)
   if disclosure == nil || disclosure?.enabled == false {
@@ -814,31 +814,31 @@ fn __apply_slack_outbound_disclosure(method, body, args) {
   return __apply_slack_ai_mark(out, disclosure)
 }
 
-fn __slack_message_disclosure(args) {
+fn __slack_message_disclosure(args: any) {
   return args?._harn?.disclosure?.slack
     ?? args?._harn?.slack_disclosure
     ?? args?.disclosure?.slack
     ?? args?.slack_disclosure
 }
 
-fn __strip_ungranted_slack_custom_identity(method, body, args, disclosure) {
+fn __strip_ungranted_slack_custom_identity(method: any, body: any, args: any, disclosure: any) {
   if method != "chat.postMessage" || __slack_customize_scope_granted(args, disclosure) {
     return body
   }
   return body.remove("username").remove("icon_url").remove("icon_emoji")
 }
 
-fn __slack_can_customize_identity(method, args, disclosure) {
+fn __slack_can_customize_identity(method: any, args: any, disclosure: any) {
   return method == "chat.postMessage"
     && disclosure?.customize?.enabled != false
     && __slack_customize_scope_granted(args, disclosure)
 }
 
-fn __slack_customize_scope_granted(args, disclosure) {
+fn __slack_customize_scope_granted(args: any, disclosure: any) {
   return __has_scope(__slack_scope_candidates(args, disclosure), SLACK_CUSTOMIZE_SCOPE)
 }
 
-fn __slack_scope_candidates(args, disclosure) {
+fn __slack_scope_candidates(args: any, disclosure: any) {
   return [
     disclosure?.customize?.granted_scopes,
     disclosure?.granted_scopes,
@@ -855,7 +855,7 @@ fn __slack_scope_candidates(args, disclosure) {
   ]
 }
 
-fn __has_scope(candidates, scope) {
+fn __has_scope(candidates: any, scope: any) {
   const wanted = lowercase(trim(scope))
   for candidate in candidates ?? [] {
     if __candidate_has_scope(candidate, wanted) {
@@ -865,7 +865,7 @@ fn __has_scope(candidates, scope) {
   return false
 }
 
-fn __candidate_has_scope(candidate, wanted) {
+fn __candidate_has_scope(candidate: any, wanted: any) {
   if candidate == nil {
     return false
   }
@@ -881,7 +881,7 @@ fn __candidate_has_scope(candidate, wanted) {
   return contains(split(normalized, " "), wanted)
 }
 
-fn __apply_slack_custom_identity(body, disclosure) {
+fn __apply_slack_custom_identity(body: any, disclosure: any) {
   const customize = disclosure?.customize ?? {}
   let out = body
   if customize?.username != nil && trim(to_string(customize.username)) != "" {
@@ -896,7 +896,7 @@ fn __apply_slack_custom_identity(body, disclosure) {
   return out
 }
 
-fn __apply_slack_textual_byline(body, disclosure) {
+fn __apply_slack_textual_byline(body: any, disclosure: any) {
   const byline = trim(to_string(disclosure?.byline ?? disclosure?.text ?? ""))
   if byline == "" {
     return body
@@ -909,7 +909,7 @@ fn __apply_slack_textual_byline(body, disclosure) {
   return out
 }
 
-fn __prepend_slack_text(body, byline) {
+fn __prepend_slack_text(body: any, byline: any) {
   const text = to_string(body?.text ?? "")
   if trim(text) == "" || __text_contains_line(text, byline) {
     return body
@@ -917,7 +917,7 @@ fn __prepend_slack_text(body, byline) {
   return body + {text: byline + "\n\n" + text}
 }
 
-fn __text_contains_line(text, line) {
+fn __text_contains_line(text: any, line: any) {
   const wanted = trim(line)
   for existing in split(to_string(text), "\n") {
     if trim(existing) == wanted {
@@ -927,11 +927,11 @@ fn __text_contains_line(text, line) {
   return false
 }
 
-fn __slack_byline_block(byline) {
+fn __slack_byline_block(byline: any) {
   return {type: "context", elements: [{type: "mrkdwn", text: byline}]}
 }
 
-fn __slack_blocks_contain_text(blocks, text) {
+fn __slack_blocks_contain_text(blocks: any, text: any) {
   const wanted = trim(text)
   for block in blocks ?? [] {
     if trim(to_string(block?.text?.text ?? "")) == wanted {
@@ -946,7 +946,7 @@ fn __slack_blocks_contain_text(blocks, text) {
   return false
 }
 
-fn __apply_slack_ai_mark(body, disclosure) {
+fn __apply_slack_ai_mark(body: any, disclosure: any) {
   const mark = disclosure?.ai_mark ?? disclosure?.mark ?? {}
   if mark?.enabled == false {
     return body
@@ -975,7 +975,7 @@ fn __apply_slack_ai_mark(body, disclosure) {
  * formats the digest and carries caller-supplied Slack options through to
  * `chat.postMessage`.
  */
-pub fn eval_verdict_post_message_payload(verdict, options = nil) {
+pub fn eval_verdict_post_message_payload(verdict: any, options: any = nil) {
   const opts = options ?? {}
   const channel = opts?.channel ?? verdict?.channel
   if channel == nil || trim(to_string(channel)) == "" {
@@ -1014,7 +1014,7 @@ pub fn eval_verdict_post_message_payload(verdict, options = nil) {
 }
 
 /** Format and post an upstream eval verdict through `chat.postMessage`. */
-pub fn post_eval_verdict(harness: Harness, verdict, options = nil) {
+pub fn post_eval_verdict(harness: Harness, verdict: any, options: any = nil) {
   const payload = eval_verdict_post_message_payload(verdict, options)
   if is_err(payload) {
     return payload
@@ -1031,7 +1031,7 @@ fn __set_state(state: SlackConnectorState) {
   return state
 }
 
-fn __outbound_method_policy(method) {
+fn __outbound_method_policy(method: any) {
   for policy in SLACK_OUTBOUND_METHOD_POLICIES {
     if policy.method == method {
       return policy
@@ -1040,7 +1040,7 @@ fn __outbound_method_policy(method) {
   return nil
 }
 
-fn __err(code, message, details = nil) {
+fn __err(code: any, message: any, details: any = nil) {
   let error = {code: code, message: message}
   if details != nil {
     error["details"] = details
@@ -1048,7 +1048,7 @@ fn __err(code, message, details = nil) {
   return Err(error)
 }
 
-fn __without_keys(input, keys) {
+fn __without_keys(input: any, keys: any) {
   let out = input ?? {}
   for key in keys ?? [] {
     out = out.remove(key)
@@ -1056,7 +1056,7 @@ fn __without_keys(input, keys) {
   return out
 }
 
-fn __slack_api_error(method, payload, status = nil) {
+fn __slack_api_error(method: any, payload: any, status: any = nil) {
   const slack_error = to_string(payload?.error ?? "slack_error")
   const details = {
     method: method,
@@ -1085,7 +1085,7 @@ fn __slack_api_error(method, payload, status = nil) {
   return __err("slack_error", slack_error, details)
 }
 
-fn __reject(error, status = 400) {
+fn __reject(error: any, status: any = 400) {
   return {
     type: "reject",
     reject: {
@@ -1096,7 +1096,7 @@ fn __reject(error, status = 400) {
   }
 }
 
-fn __header(headers, name) {
+fn __header(headers: any, name: any) {
   const wanted = lowercase(name)
   for entry in (headers ?? {}).entries() {
     if lowercase(trim(to_string(entry.key))) == wanted {
@@ -1106,7 +1106,7 @@ fn __header(headers, name) {
   return nil
 }
 
-fn __canonical_slack_headers(headers) {
+fn __canonical_slack_headers(headers: any) {
   let canonical = {}
   for pair in [
     {raw: "content-type", canonical: "Content-Type"},
@@ -1127,7 +1127,7 @@ fn __canonical_slack_headers(headers) {
   return canonical
 }
 
-fn __slack_retry(headers) {
+fn __slack_retry(headers: any) {
   const retry_num_raw = __header(headers, "x-slack-retry-num")
   const retry_reason = __header(headers, "x-slack-retry-reason")
   let retry_num = nil
@@ -1149,14 +1149,14 @@ fn __slack_retry(headers) {
   }
 }
 
-fn __slack_metrics(retry_info) {
+fn __slack_metrics(retry_info: any) {
   if retry_info?.is_retry ?? false {
     return {slack_retry_delivery: 1, slack_first_delivery: 0, slack_retry_num: retry_info?.num ?? 0}
   }
   return {slack_retry_delivery: 0, slack_first_delivery: 1, slack_retry_num: 0}
 }
 
-fn __signing_secret(secrets: HarnessSecrets, raw) {
+fn __signing_secret(secrets: HarnessSecrets, raw: any) {
   const direct = __first_secret_value(
     secrets,
     [
@@ -1215,7 +1215,7 @@ fn __signing_secret(secrets: HarnessSecrets, raw) {
   return nil
 }
 
-fn __binding_signing_secret(secrets: HarnessSecrets, binding) {
+fn __binding_signing_secret(secrets: HarnessSecrets, binding: any) {
   return __first_secret_value(
     secrets,
     [
@@ -1232,7 +1232,7 @@ fn __binding_signing_secret(secrets: HarnessSecrets, binding) {
   )
 }
 
-fn __signing_secret_id(raw) {
+fn __signing_secret_id(raw: any) {
   const metadata = raw?.metadata ?? {}
   const direct_id = __first_secret_id(
     [
@@ -1274,7 +1274,7 @@ fn __signing_secret_id(raw) {
   return "slack/signing-secret"
 }
 
-fn __binding_signing_secret_id(binding) {
+fn __binding_signing_secret_id(binding: any) {
   return __first_secret_id(
     [
       binding?.signing_secret_id,
@@ -1295,7 +1295,7 @@ fn __binding_signing_secret_id(binding) {
   )
 }
 
-fn __first_secret_value(secrets: HarnessSecrets, candidates, fallback_id = nil) {
+fn __first_secret_value(secrets: HarnessSecrets, candidates: any, fallback_id: any = nil) {
   for candidate in candidates ?? [] {
     const value = __secret_value_optional(secrets, candidate, nil)
     if value != nil && trim(to_string(value)) != "" {
@@ -1305,7 +1305,7 @@ fn __first_secret_value(secrets: HarnessSecrets, candidates, fallback_id = nil) 
   return __secret_get_optional(secrets, fallback_id)
 }
 
-fn __first_secret_id(candidates) {
+fn __first_secret_id(candidates: any) {
   for candidate in candidates ?? [] {
     const id = __secret_id_candidate(candidate)
     if id != nil && trim(to_string(id)) != "" {
@@ -1315,14 +1315,14 @@ fn __first_secret_id(candidates) {
   return nil
 }
 
-fn __secret_id_candidate(value) {
+fn __secret_id_candidate(value: any) {
   if value == nil || trim(to_string(value)) == "" {
     return nil
   }
   return trim(to_string(value))
 }
 
-fn __secret_value_optional(secrets: HarnessSecrets, value, fallback_id = nil) {
+fn __secret_value_optional(secrets: HarnessSecrets, value: any, fallback_id: any = nil) {
   if value != nil && trim(to_string(value)) != "" {
     const raw = trim(to_string(value))
     if contains(raw, "/") {
@@ -1336,7 +1336,7 @@ fn __secret_value_optional(secrets: HarnessSecrets, value, fallback_id = nil) {
   return __secret_get_optional(secrets, fallback_id)
 }
 
-fn __secret_get_optional(secrets: HarnessSecrets, secret_id) {
+fn __secret_get_optional(secrets: HarnessSecrets, secret_id: any) {
   if secret_id == nil || trim(to_string(secret_id)) == "" {
     return nil
   }
@@ -1349,7 +1349,7 @@ fn __secret_get_optional(secrets: HarnessSecrets, secret_id) {
   return to_string(unwrap(resolved))
 }
 
-fn __include_bot_messages(raw) {
+fn __include_bot_messages(raw: any) {
   // Security: read from binding/ctx only — never from the attacker-controlled
   // raw envelope. The binding-id lookup is the only raw-derived hop, and only
   // selects a trusted binding entry.
@@ -1368,9 +1368,9 @@ fn __include_bot_messages(raw) {
 
 fn __verify_slack_signature(
   harness: {clock: HarnessClock, secrets: HarnessSecrets},
-  raw,
-  headers,
-  body_text,
+  raw: any,
+  headers: any,
+  body_text: any,
 ) {
   const signature = __header(headers, "x-slack-signature")
   if signature == nil || signature == "" {
@@ -1413,7 +1413,7 @@ fn __verify_slack_signature(
 }
 
 @complexity(allow)
-fn __normalize_event_callback(payload, raw) {
+fn __normalize_event_callback(payload: any, raw: any) {
   if payload?.type != "event_callback" {
     return __err(
       "unsupported_payload",
@@ -1668,7 +1668,7 @@ fn __normalize_event_callback(payload, raw) {
  * bodies. Falls back to body sniffing when the content-type header is absent
  * (Slack always sends the header, but tests and proxies may omit it).
  */
-fn __is_form_encoded(headers, body_text) {
+fn __is_form_encoded(headers: any, body_text: any) {
   const content_type = lowercase(to_string(__header(headers, "content-type") ?? ""))
   if contains(content_type, "application/x-www-form-urlencoded") {
     return true
@@ -1684,7 +1684,7 @@ fn __is_form_encoded(headers, body_text) {
 }
 
 /** Parse a urlencoded body into a flat dict of first-wins string fields. */
-fn __form_fields(body_text) {
+fn __form_fields(body_text: any) {
   const parsed = try {
     query_parse(to_string(body_text ?? ""))
   }
@@ -1706,7 +1706,7 @@ fn __form_fields(body_text) {
  * `interactivity` envelope. Interactivity payloads carry a `payload=<json>`
  * field; slash commands carry flat `command`/`text`/... fields.
  */
-fn __normalize_form_inbound(body_text, raw) {
+fn __normalize_form_inbound(body_text: any, raw: any) {
   const fields_result = __form_fields(body_text)
   if is_err(fields_result) {
     return __reject(unwrap_err(fields_result), 400)
@@ -1719,7 +1719,7 @@ fn __normalize_form_inbound(body_text, raw) {
 }
 
 /** Normalize a Slack slash-command form POST into a `slash_command` envelope. */
-fn __normalize_slash_command(fields, raw) {
+fn __normalize_slash_command(fields: any, raw: any) {
   const command = to_string(fields?.command ?? "")
   const text = to_string(fields?.text ?? "")
   const channel = to_string(fields?.channel_id ?? "")
@@ -1773,7 +1773,7 @@ fn __normalize_slash_command(fields, raw) {
 }
 
 /** Normalize a Slack interactivity `payload=<json>` POST into an `interactivity` envelope. */
-fn __normalize_interactivity(payload_json, raw) {
+fn __normalize_interactivity(payload_json: any, raw: any) {
   const parsed = try {
     json_parse(payload_json)
   }
@@ -1846,7 +1846,7 @@ fn __normalize_interactivity(payload_json, raw) {
 }
 
 /** Resolve the first block-action id from an interactivity payload, if any. */
-fn __interactivity_action_id(payload) {
+fn __interactivity_action_id(payload: any) {
   const actions = payload?.actions ?? []
   if len(actions) > 0 {
     return actions[0]?.action_id ?? actions[0]?.block_id
@@ -1855,7 +1855,7 @@ fn __interactivity_action_id(payload) {
 }
 
 /** Classify a slash-command channel by id prefix when channel_type is absent. */
-fn __slash_channel_type(channel, fields) {
+fn __slash_channel_type(channel: any, fields: any) {
   const declared = fields?.channel_type
   if declared != nil && trim(to_string(declared)) != "" {
     return to_string(declared)
@@ -1869,7 +1869,7 @@ fn __slash_channel_type(channel, fields) {
   return nil
 }
 
-fn __event_result(kind, dedupe_key, payload, headers = nil) {
+fn __event_result(kind: any, dedupe_key: any, payload: any, headers: any = nil) {
   return {
     kind: kind,
     dedupe_key: dedupe_key,
@@ -1884,7 +1884,7 @@ fn __event_result(kind, dedupe_key, payload, headers = nil) {
  * `public` | `private` | `im` | `mpim`. Prefers Slack `channel_type`, then
  * falls back to channel-id prefixes (D=im, G/C may be private/public/mpim).
  */
-fn __agent_channel_kind(channel_type, channel_id) {
+fn __agent_channel_kind(channel_type: any, channel_id: any) {
   const declared = to_string(channel_type ?? "")
   if declared == "im" {
     return "im"
@@ -1914,7 +1914,7 @@ fn __agent_channel_kind(channel_type, channel_id) {
  * triggers — `app_mention`, DM/group-DM `message`, and `slash_command` —
  * normalize into this one shape. See the README for the contract.
  */
-fn __agent_summon(normalized, source, trigger_kind) {
+fn __agent_summon(normalized: any, source: any, trigger_kind: any) {
   const channel_id = to_string(normalized?.channel ?? "")
   const channel_kind = __agent_channel_kind(normalized?.channel_type, channel_id)
   const visibility = if channel_kind == "im" || channel_kind == "mpim"
@@ -1939,7 +1939,7 @@ fn __agent_summon(normalized, source, trigger_kind) {
  * Decide whether an event_type/channel pairing is a summon and, if so, the
  * canonical trigger_kind. Returns nil for non-summon events.
  */
-fn __agent_summon_trigger_kind(event_type, channel_type, channel_id) {
+fn __agent_summon_trigger_kind(event_type: any, channel_type: any, channel_id: any) {
   if event_type == "app_mention" {
     return "app_mention"
   }
@@ -1955,7 +1955,7 @@ fn __agent_summon_trigger_kind(event_type, channel_type, channel_id) {
   return nil
 }
 
-fn __dedupe_key(payload, event_type, resource_id) {
+fn __dedupe_key(payload: any, event_type: any, resource_id: any) {
   const event_id = payload?.event_id
   if event_id != nil && trim(to_string(event_id)) != "" {
     return "slack:event:" + to_string(event_id)
@@ -1964,7 +1964,12 @@ fn __dedupe_key(payload, event_type, resource_id) {
   return "slack:" + to_string(team) + ":" + event_type + ":" + resource_id
 }
 
-fn __payload_with_normalized_fields(payload, normalized, raw = nil, dedupe_key = nil) {
+fn __payload_with_normalized_fields(
+  payload: any,
+  normalized: any,
+  raw: any = nil,
+  dedupe_key: any = nil,
+) {
   const base = payload ?? {}
   const provider_raw = {
     envelope: payload,
@@ -1987,7 +1992,7 @@ fn __payload_with_normalized_fields(payload, normalized, raw = nil, dedupe_key =
   return result
 }
 
-fn __slack_source(normalized, envelope, delivery_dedupe_key) {
+fn __slack_source(normalized: any, envelope: any, delivery_dedupe_key: any) {
   const event = normalized?.raw ?? {}
   const team_id = envelope?.team_id ?? event?.team ?? event?.team_id
     ?? event?.assistant_thread?.context?.team_id
@@ -2045,7 +2050,7 @@ fn __slack_source(normalized, envelope, delivery_dedupe_key) {
   }
 }
 
-fn __slack_source_kind(normalized) {
+fn __slack_source_kind(normalized: any) {
   const event_type = normalized?.event_type ?? ""
   const thread_ts = normalized?.thread_ts
   const message_ts = normalized?.message_ts
@@ -2088,7 +2093,7 @@ fn __slack_source_kind(normalized) {
   return event_type
 }
 
-fn __slack_source_refs(normalized, source) {
+fn __slack_source_refs(normalized: any, source: any) {
   let refs = [source]
   const team_id = source?.team_id
   const channel = source?.channel_id
@@ -2170,7 +2175,7 @@ fn __slack_source_refs(normalized, source) {
   return refs
 }
 
-fn __slack_triage_source(normalized, source, source_refs, delivery_dedupe_key) {
+fn __slack_triage_source(normalized: any, source: any, source_refs: any, delivery_dedupe_key: any) {
   const text = normalized?.text ?? ""
   const mentions = __slack_mentions(text)
   return {
@@ -2204,7 +2209,7 @@ fn __slack_triage_source(normalized, source, source_refs, delivery_dedupe_key) {
   }
 }
 
-fn __slack_actor_ids(normalized) {
+fn __slack_actor_ids(normalized: any) {
   let actors = []
   const user_id = normalized?.user?.id
   if user_id != nil && user_id != "" {
@@ -2217,7 +2222,7 @@ fn __slack_actor_ids(normalized) {
   return actors
 }
 
-fn __slack_actors(normalized, team_id) {
+fn __slack_actors(normalized: any, team_id: any) {
   let actors = []
   const user = normalized?.user ?? {}
   if user?.id != nil && user.id != "" {
@@ -2250,7 +2255,7 @@ fn __slack_actors(normalized, team_id) {
   return actors
 }
 
-fn __slack_privacy(normalized) {
+fn __slack_privacy(normalized: any) {
   let flags = []
   if trim(to_string(normalized?.text ?? "")) != "" {
     flags = flags.push("contains_message_text")
@@ -2275,7 +2280,7 @@ fn __slack_privacy(normalized) {
   }
 }
 
-fn __slack_action_intents(normalized, source) {
+fn __slack_action_intents(normalized: any, source: any) {
   let intents = [
     {kind: "dismiss", scope: "harn", mutates_provider: false, requires_approval: false},
     {kind: "snooze", scope: "harn", mutates_provider: false, requires_approval: false},
@@ -2304,7 +2309,7 @@ fn __slack_action_intents(normalized, source) {
   return intents
 }
 
-fn __slack_triage_summary(normalized) {
+fn __slack_triage_summary(normalized: any) {
   if normalized?.event_type == "reaction_added" {
     return "Reaction `" + to_string(normalized?.reaction ?? "") + "` on Slack "
       + to_string(normalized?.item_type ?? "item")
@@ -2328,7 +2333,7 @@ fn __slack_triage_summary(normalized) {
   return to_string(normalized?.event_type ?? "Slack event")
 }
 
-fn __slack_mentions(text) {
+fn __slack_mentions(text: any) {
   const matches = regex_match("<@[A-Za-z0-9._-]+>", to_string(text ?? ""))
   if matches == nil {
     return []
@@ -2340,7 +2345,7 @@ fn __slack_mentions(text) {
   return users
 }
 
-fn __eval_verdict_title(verdict) {
+fn __eval_verdict_title(verdict: any) {
   const suite = to_string(verdict?.suite ?? verdict?.suite_id ?? "eval suite")
   const decision = __eval_verdict_decision(verdict)
   if decision == "regression" {
@@ -2352,7 +2357,7 @@ fn __eval_verdict_title(verdict) {
   return "Eval verdict: " + suite
 }
 
-fn __eval_verdict_summary(verdict) {
+fn __eval_verdict_summary(verdict: any) {
   const paired = verdict?.paired_delta ?? verdict?.paired ?? {}
   const gate = verdict?.gate ?? {}
   return "Macro pass@1 "
@@ -2376,7 +2381,7 @@ fn __eval_verdict_summary(verdict) {
     + "."
 }
 
-fn __eval_verdict_fields(verdict) {
+fn __eval_verdict_fields(verdict: any) {
   const gate = verdict?.gate ?? {}
   const paired = verdict?.paired_delta ?? verdict?.paired ?? {}
   const reliability = verdict?.reliability ?? {}
@@ -2416,7 +2421,7 @@ fn __eval_verdict_fields(verdict) {
   ]
 }
 
-fn __eval_verdict_decision(verdict) {
+fn __eval_verdict_decision(verdict: any) {
   const explicit = verdict?.decision ?? verdict?.status
   if explicit != nil && trim(to_string(explicit)) != "" {
     return lowercase(to_string(explicit))
@@ -2438,7 +2443,7 @@ fn __eval_verdict_decision(verdict) {
   return "inconclusive"
 }
 
-fn __eval_verdict_case_lines(cases, limit) {
+fn __eval_verdict_case_lines(cases: any, limit: any) {
   let lines = ""
   let count = 0
   for case in cases ?? [] {
@@ -2455,7 +2460,7 @@ fn __eval_verdict_case_lines(cases, limit) {
   return trim(lines)
 }
 
-fn __first_present(values) {
+fn __first_present(values: any) {
   for value in values ?? [] {
     if value != nil {
       return value
@@ -2464,14 +2469,14 @@ fn __first_present(values) {
   return nil
 }
 
-fn __format_percent(value) {
+fn __format_percent(value: any) {
   if value == nil {
     return "n/a"
   }
   return to_string(round(value * 1000.0) / 10.0) + "%"
 }
 
-fn __format_delta(value) {
+fn __format_delta(value: any) {
   if value == nil {
     return "n/a"
   }
@@ -2482,7 +2487,13 @@ fn __format_delta(value) {
   return to_string(pct) + " pp"
 }
 
-fn __slack_source_key(source_kind, team_id, channel, message_ts, normalized) {
+fn __slack_source_key(
+  source_kind: any,
+  team_id: any,
+  channel: any,
+  message_ts: any,
+  normalized: any,
+) {
   if source_kind == "file" && normalized?.file_id != nil && normalized.file_id != "" {
     return __slack_ref_id("file", team_id, normalized.file_id)
   }
@@ -2499,7 +2510,13 @@ fn __slack_source_key(source_kind, team_id, channel, message_ts, normalized) {
   )
 }
 
-fn __slack_source_dedupe_key(source_kind, team_id, channel, message_ts, normalized) {
+fn __slack_source_dedupe_key(
+  source_kind: any,
+  team_id: any,
+  channel: any,
+  message_ts: any,
+  normalized: any,
+) {
   const team = __slack_team_part(team_id)
   if source_kind == "reaction" || source_kind == "file_reaction" {
     return "slack:reaction:" + team + ":" + to_string(channel ?? "") + ":"
@@ -2520,19 +2537,19 @@ fn __slack_source_dedupe_key(source_kind, team_id, channel, message_ts, normaliz
     + to_string(normalized?.resource_id ?? "unknown")
 }
 
-fn __slack_ref_id(kind, team_id, id) {
+fn __slack_ref_id(kind: any, team_id: any, id: any) {
   return "slack:" + to_string(kind) + ":" + __slack_team_part(team_id) + ":"
     + to_string(id ?? "unknown")
 }
 
-fn __slack_team_part(team_id) {
+fn __slack_team_part(team_id: any) {
   if team_id == nil || trim(to_string(team_id)) == "" {
     return "unknown-team"
   }
   return to_string(team_id)
 }
 
-fn __slack_member_ref(team_id, user_id, role) {
+fn __slack_member_ref(team_id: any, user_id: any, role: any) {
   return {
     provider: SLACK_PROVIDER_ID,
     kind: "member",
@@ -2544,7 +2561,7 @@ fn __slack_member_ref(team_id, user_id, role) {
   }
 }
 
-fn __slack_file_ref(team_id, file_id) {
+fn __slack_file_ref(team_id: any, file_id: any) {
   return {
     provider: SLACK_PROVIDER_ID,
     kind: "file",
@@ -2555,7 +2572,7 @@ fn __slack_file_ref(team_id, file_id) {
   }
 }
 
-fn __slack_channel_url(team_id, channel) {
+fn __slack_channel_url(team_id: any, channel: any) {
   if channel == nil || trim(to_string(channel)) == "" {
     return nil
   }
@@ -2566,7 +2583,7 @@ fn __slack_channel_url(team_id, channel) {
   return "https://slack.com/app_redirect?" + query_stringify(query)
 }
 
-fn __slack_channel_deep_link(team_id, channel) {
+fn __slack_channel_deep_link(team_id: any, channel: any) {
   if channel == nil || trim(to_string(channel)) == "" || team_id == nil
     || trim(to_string(team_id))
       == "" {
@@ -2578,7 +2595,7 @@ fn __slack_channel_deep_link(team_id, channel) {
     )
 }
 
-fn __slack_member_deep_link(team_id, user_id) {
+fn __slack_member_deep_link(team_id: any, user_id: any) {
   if user_id == nil || trim(to_string(user_id)) == "" || team_id == nil
     || trim(to_string(team_id))
       == "" {
@@ -2590,7 +2607,7 @@ fn __slack_member_deep_link(team_id, user_id) {
     )
 }
 
-fn __slack_file_deep_link(team_id, file_id) {
+fn __slack_file_deep_link(team_id: any, file_id: any) {
   if file_id == nil || trim(to_string(file_id)) == "" || team_id == nil
     || trim(to_string(team_id))
       == "" {
@@ -2602,7 +2619,7 @@ fn __slack_file_deep_link(team_id, file_id) {
     )
 }
 
-fn __slack_app_home_deep_link(team_id, app_id, tab = nil) {
+fn __slack_app_home_deep_link(team_id: any, app_id: any, tab: any = nil) {
   if app_id == nil || trim(to_string(app_id)) == "" || team_id == nil
     || trim(to_string(team_id))
       == "" {
@@ -2615,7 +2632,7 @@ fn __slack_app_home_deep_link(team_id, app_id, tab = nil) {
   return "slack://app?" + query_stringify(query)
 }
 
-fn __slack_permalink_request(channel, message_ts) {
+fn __slack_permalink_request(channel: any, message_ts: any) {
   if channel == nil || trim(to_string(channel)) == "" || message_ts == nil
     || trim(to_string(message_ts))
       == "" {
@@ -2629,7 +2646,7 @@ fn __slack_permalink_request(channel, message_ts) {
   }
 }
 
-fn __slack_file_export_request_ref(team_id, file_id, file = nil) {
+fn __slack_file_export_request_ref(team_id: any, file_id: any, file: any = nil) {
   return {
     method: "artifact.export_request",
     args: {file_id: file_id, team_id: team_id, file: file},
@@ -2638,7 +2655,7 @@ fn __slack_file_export_request_ref(team_id, file_id, file = nil) {
   }
 }
 
-fn __mime_type_from_name(name) {
+fn __mime_type_from_name(name: any) {
   const text = lowercase(to_string(name ?? ""))
   if text.ends_with(".pdf") {
     return "application/pdf"
@@ -2667,7 +2684,7 @@ fn __mime_type_from_name(name) {
   return "application/octet-stream"
 }
 
-fn __artifact_media(args, default_mime_type) {
+fn __artifact_media(args: any, default_mime_type: any) {
   return {
     uri: args?.uri ?? args?.path,
     mime_type: args?.mime_type ?? args?.content_type ?? default_mime_type,
@@ -2676,7 +2693,7 @@ fn __artifact_media(args, default_mime_type) {
   }
 }
 
-fn __slack_query(fields) {
+fn __slack_query(fields: any) {
   let query = []
   for key in (fields ?? {}).keys() {
     const value = fields.get(key)
@@ -2690,7 +2707,7 @@ fn __slack_query(fields) {
   return "?" + query_stringify(query)
 }
 
-fn __outbound_config(secrets: HarnessSecrets, args) {
+fn __outbound_config(secrets: HarnessSecrets, args: any) {
   const api_base_url_check = __validate_api_base_url(args?.api_base_url)
   if is_err(api_base_url_check) {
     return api_base_url_check
@@ -2718,7 +2735,7 @@ fn __outbound_config(secrets: HarnessSecrets, args) {
  * app-level `xapp-` token is resolvable. Returns Ok(true) when allowed, or an
  * __err describing why the connector stays on the HTTP Events path.
  */
-fn __socket_mode_enabled(secrets: HarnessSecrets, args) {
+fn __socket_mode_enabled(secrets: HarnessSecrets, args: any) {
   if !__socket_mode_enable_flag(args) {
     return __err(
       "socket_mode_disabled",
@@ -2743,7 +2760,7 @@ fn __socket_mode_enabled(secrets: HarnessSecrets, args) {
  * Read the Socket Mode enable flag from the most-trusted source available:
  * explicit args first, then the matched binding, then connector ctx.
  */
-fn __socket_mode_enable_flag(args) {
+fn __socket_mode_enable_flag(args: any) {
   const from_args = args?.enable_socket_mode ?? args?.socket_mode?.enabled ?? args?.enable
   if from_args != nil {
     return __is_true(from_args)
@@ -2765,14 +2782,14 @@ fn __socket_mode_enable_flag(args) {
 }
 
 /** Strict boolean-true check: only the literal `true` enables a guarded path. */
-fn __is_true(value) {
+fn __is_true(value: any) {
   match value {
     true -> { return true }
     _ -> { return false }
   }
 }
 
-fn __socket_mode_config(secrets: HarnessSecrets, args) {
+fn __socket_mode_config(secrets: HarnessSecrets, args: any) {
   const api_base_url_check = __validate_api_base_url(args?.api_base_url)
   if is_err(api_base_url_check) {
     return api_base_url_check
@@ -2794,11 +2811,11 @@ fn __socket_mode_config(secrets: HarnessSecrets, args) {
   return Ok({api_base_url: to_string(api_base_url), app_token: to_string(app_token)})
 }
 
-fn __socket_handle(connection) {
+fn __socket_handle(connection: any) {
   return connection?.socket ?? connection?.id ?? connection
 }
 
-fn __socket_mode_ack(net: HarnessNet, socket, envelope) {
+fn __socket_mode_ack(net: HarnessNet, socket: any, envelope: any) {
   const envelope_id = envelope?.envelope_id
   if envelope_id == nil || trim(to_string(envelope_id)) == "" {
     return {acked: false, envelope_id: nil}
@@ -2806,7 +2823,7 @@ fn __socket_mode_ack(net: HarnessNet, socket, envelope) {
   return socket_mode_ack(net, socket, envelope_id)
 }
 
-fn __slack_api_url(api_base_url, method) {
+fn __slack_api_url(api_base_url: any, method: any) {
   const trimmed = trim(to_string(api_base_url))
   if trimmed.ends_with("/") {
     return trimmed[0:len(trimmed) - 1] + "/" + method
@@ -2818,7 +2835,7 @@ fn __slack_api_url(api_base_url, method) {
  * Extract the host from a URL string (case-insensitive). Returns nil for
  * inputs that don't look like an absolute http(s) URL.
  */
-fn __extract_host(url) {
+fn __extract_host(url: any) {
   const trimmed = trim(to_string(url ?? ""))
   if trimmed == "" {
     return nil
@@ -2857,7 +2874,7 @@ fn __extract_host(url) {
  * Validate caller-supplied `api_base_url` against the connector allowlist.
  * Returns Ok(trimmed_url) when accepted, or __err otherwise.
  */
-fn __validate_api_base_url(api_base_url) {
+fn __validate_api_base_url(api_base_url: any) {
   if api_base_url == nil {
     return Ok(SLACK_API_BASE_URL)
   }
