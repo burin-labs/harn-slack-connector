@@ -1,5 +1,5 @@
 import { normalize_inbound, shutdown } from "../src/lib"
-import { fixture_raw, fixture_ts, signed_form_raw } from "./helpers"
+import { fixture_raw, fixture_ts, signed_form_raw } from "../testdata/helpers"
 
 /**
  * C4 coverage: slash-command and interactivity (block_actions / view

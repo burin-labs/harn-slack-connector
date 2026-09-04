@@ -1,5 +1,5 @@
 import { call, shutdown, socket_mode_connect, socket_mode_receive } from "../src/lib"
-import { fixture_body } from "./helpers"
+import { fixture_body } from "../testdata/helpers"
 
 fn __is_sandbox_restriction(error: any) {
   return error_is(error, "tool_rejected")
