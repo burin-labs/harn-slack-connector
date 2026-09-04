@@ -5,7 +5,7 @@ import {
   fixture_ts,
   signed_raw,
   slack_headers,
-} from "./helpers"
+} from "../testdata/helpers"
 
 pipeline test_normalize_smoke(harness: Harness) {
   const secret = "test-signing-secret"

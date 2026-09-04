@@ -1,5 +1,5 @@
 import { init, normalize_inbound, shutdown } from "../src/lib"
-import { fixture_raw, fixture_ts } from "./helpers"
+import { fixture_raw, fixture_ts } from "../testdata/helpers"
 
 fn assert_event(
   harness: Harness,

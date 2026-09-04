@@ -58,7 +58,7 @@ pub fn signed_form_raw(secret: any, body: any, ts: any, extra: any = nil) {
 
 /** Read a Slack webhook fixture body by basename. */
 pub fn fixture_body(fs: HarnessFs, name: any) {
-  return fs.read_text(fs.source_dir() + "/fixtures/webhooks/" + name + ".json")
+  return fs.read_text(fs.source_dir() + "/../tests/fixtures/webhooks/" + name + ".json")
 }
 
 /** Build a signed raw Events API request for a named webhook fixture. */
