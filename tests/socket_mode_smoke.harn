@@ -47,7 +47,7 @@ pipeline test_socket_mode_smoke(harness: Harness) {
   // Socket Mode is opt-in: callers must pass enable_socket_mode + an xapp- token.
   const conn_result = try {
     socket_mode_connect(
-      {net: harness.net, secrets: harness.secrets},
+      pick(harness, ["net", "secrets"]),
       {
         socket_url: "wss://socket.slack.test/app/test",
         timeout_ms: 0,
