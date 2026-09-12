@@ -262,7 +262,7 @@ pub fn normalize_inbound(harness: Harness, raw: any) {
   const body_text = to_string(body_candidate)
   const headers = raw?.headers ?? {}
   const verified = __verify_slack_signature(
-    {clock: harness.clock, secrets: harness.secrets},
+    pick(harness, ["clock", "secrets"]),
     raw,
     headers,
     body_text,
