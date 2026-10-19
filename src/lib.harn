@@ -519,7 +519,7 @@ pub fn call(harness: Harness, method: any, args: any = {}) {
   )
   if slack_method == "users.info" && body?.user == nil && body?.user_id != nil {
     body["user"] = body.user_id
-    body = body.remove("user_id")
+    body.remove("user_id")
   }
   body = __apply_slack_outbound_disclosure(slack_method, body, args ?? {})
   if slack_method == "files.info" {
@@ -825,7 +825,7 @@ fn __strip_ungranted_slack_custom_identity(method: any, body: any, args: any, di
   if method != "chat.postMessage" || __slack_customize_scope_granted(args, disclosure) {
     return body
   }
-  return body.remove("username").remove("icon_url").remove("icon_emoji")
+  return __without_keys(body, ["username", "icon_url", "icon_emoji"])
 }
 
 fn __slack_can_customize_identity(method: any, args: any, disclosure: any) {
@@ -997,13 +997,13 @@ pub fn eval_verdict_post_message_payload(verdict: any, options: any = nil) {
     5,
   )
   if cases != "" {
-    payload.blocks = payload.blocks.push(
+    payload.blocks.push(
       {type: "section", text: {type: "mrkdwn", text: "*Top regressed cases*\n" + cases}},
     )
   }
   const link = verdict?.dashboard_url ?? verdict?.ledger_url ?? verdict?.run_url
   if link != nil && trim(to_string(link)) != "" {
-    payload.blocks = payload.blocks.push(
+    payload.blocks.push(
       {
         type: "context",
         elements: [{type: "mrkdwn", text: "<" + to_string(link) + "|Open eval ledger>"}],
@@ -1051,7 +1051,7 @@ fn __err(code: any, message: any, details: any = nil) {
 fn __without_keys(input: any, keys: any) {
   let out = input ?? {}
   for key in keys ?? [] {
-    out = out.remove(key)
+    out.remove(key)
   }
   return out
 }
@@ -2104,7 +2104,7 @@ fn __slack_source_refs(normalized: any, source: any) {
     } else {
       "channel"
     }
-    refs = refs.push(
+    refs.push(
       {
         provider: SLACK_PROVIDER_ID,
         kind: conversation_kind,
@@ -2117,7 +2117,7 @@ fn __slack_source_refs(normalized: any, source: any) {
     )
   }
   if source?.thread_root_ts != nil {
-    refs = refs.push(
+    refs.push(
       {
         provider: SLACK_PROVIDER_ID,
         kind: "thread",
@@ -2133,16 +2133,16 @@ fn __slack_source_refs(normalized: any, source: any) {
   }
   const user_id = normalized?.user?.id
   if user_id != nil && user_id != "" {
-    refs = refs.push(__slack_member_ref(team_id, user_id, "actor"))
+    refs.push(__slack_member_ref(team_id, user_id, "actor"))
   }
   if normalized?.item_user != nil && normalized.item_user != "" && normalized.item_user != user_id {
-    refs = refs.push(__slack_member_ref(team_id, normalized.item_user, "item_user"))
+    refs.push(__slack_member_ref(team_id, normalized.item_user, "item_user"))
   }
   const item = normalized?.raw?.item ?? {}
   const file_id = item?.file ?? normalized?.file_id ?? normalized?.raw?.file_id
     ?? normalized?.raw?.file?.id
   if file_id != nil && file_id != "" {
-    refs = refs.push(
+    refs.push(
       {
         provider: SLACK_PROVIDER_ID,
         kind: "file",
@@ -2161,7 +2161,7 @@ fn __slack_source_refs(normalized: any, source: any) {
   }
   const canvas_id = normalized?.raw?.canvas_id ?? normalized?.raw?.canvas?.id
   if canvas_id != nil && canvas_id != "" {
-    refs = refs.push(
+    refs.push(
       {
         provider: SLACK_PROVIDER_ID,
         kind: "canvas",
@@ -2213,11 +2213,11 @@ fn __slack_actor_ids(normalized: any) {
   let actors = []
   const user_id = normalized?.user?.id
   if user_id != nil && user_id != "" {
-    actors = actors.push(user_id)
+    actors.push(user_id)
   }
   const item_user = normalized?.item_user
   if item_user != nil && item_user != "" && item_user != user_id {
-    actors = actors.push(item_user)
+    actors.push(item_user)
   }
   return actors
 }
@@ -2226,7 +2226,7 @@ fn __slack_actors(normalized: any, team_id: any) {
   let actors = []
   const user = normalized?.user ?? {}
   if user?.id != nil && user.id != "" {
-    actors = actors.push(
+    actors.push(
       {
         provider: SLACK_PROVIDER_ID,
         id: user.id,
@@ -2242,7 +2242,7 @@ fn __slack_actors(normalized: any, team_id: any) {
   }
   const item_user = normalized?.item_user
   if item_user != nil && item_user != "" && item_user != user?.id {
-    actors = actors.push(
+    actors.push(
       {
         provider: SLACK_PROVIDER_ID,
         id: item_user,
@@ -2258,14 +2258,14 @@ fn __slack_actors(normalized: any, team_id: any) {
 fn __slack_privacy(normalized: any) {
   let flags = []
   if trim(to_string(normalized?.text ?? "")) != "" {
-    flags = flags.push("contains_message_text")
+    flags.push("contains_message_text")
   }
   if normalized?.channel_type == "im" || starts_with(to_string(normalized?.channel ?? ""), "D") {
-    flags = flags.push("direct_message")
+    flags.push("direct_message")
   }
   if normalized?.raw?.item?.file != nil || normalized?.raw?.file != nil
     || normalized?.file_id != nil {
-    flags = flags.push("contains_file_ref")
+    flags.push("contains_file_ref")
   }
   return {
     classification: if contains(flags, "direct_message") {
@@ -2295,7 +2295,7 @@ fn __slack_action_intents(normalized: any, source: any) {
   const channel = normalized?.channel
   const thread_ts = normalized?.thread_ts ?? normalized?.message_ts
   if channel != nil && channel != "" && thread_ts != nil && thread_ts != "" {
-    intents = intents.push(
+    intents.push(
       {
         kind: "draft_reply",
         scope: "slack",
@@ -2340,7 +2340,7 @@ fn __slack_mentions(text: any) {
   }
   let users = []
   for token in matches {
-    users = users.push(to_string(token).replace("<@", "").replace(">", ""))
+    users.push(to_string(token).replace("<@", "").replace(">", ""))
   }
   return users
 }
@@ -2578,7 +2578,7 @@ fn __slack_channel_url(team_id: any, channel: any) {
   }
   let query = [{key: "channel", value: to_string(channel)}]
   if team_id != nil && trim(to_string(team_id)) != "" {
-    query = query.push({key: "team", value: to_string(team_id)})
+    query.push({key: "team", value: to_string(team_id)})
   }
   return "https://slack.com/app_redirect?" + query_stringify(query)
 }
@@ -2627,7 +2627,7 @@ fn __slack_app_home_deep_link(team_id: any, app_id: any, tab: any = nil) {
   }
   let query = [{key: "team", value: to_string(team_id)}, {key: "id", value: to_string(app_id)}]
   if tab != nil && trim(to_string(tab)) != "" {
-    query = query.push({key: "tab", value: to_string(tab)})
+    query.push({key: "tab", value: to_string(tab)})
   }
   return "slack://app?" + query_stringify(query)
 }
@@ -2698,7 +2698,7 @@ fn __slack_query(fields: any) {
   for key in (fields ?? {}).keys() {
     const value = fields.get(key)
     if value != nil {
-      query = query.push({key: key, value: value})
+      query.push({key: key, value: value})
     }
   }
   if len(query) == 0 {
