@@ -361,8 +361,8 @@ pub fn socket_mode_connect(harness: {net: HarnessNet, secrets: HarnessSecrets}, 
       return __err(
         "slack_error",
         payload?.error
-          ?? ("Slack apps.connections.open failed with status "
-            + to_string(http_response.status)),
+          ?? "Slack apps.connections.open failed with status "
+            + to_string(http_response.status),
       )
     }
     resolved_url = payload?.url
@@ -581,7 +581,7 @@ pub fn artifact_export_request(secrets: HarnessSecrets, args: any = {}) {
       headers: {Authorization: "Bearer {" + SLACK_FILE_DOWNLOAD_SECRET + "}"},
       auth: {type: "bearer", secret: SLACK_FILE_DOWNLOAD_SECRET},
       artifact: {
-        uri: args?.uri ?? ("slack://files/" + url_encode(to_string(file_id ?? name))),
+        uri: args?.uri ?? "slack://files/" + url_encode(to_string(file_id ?? name)),
         name: name,
         mime_type: mime_type,
         source_ref: __slack_file_ref(args?.team_id, file_id ?? name),
